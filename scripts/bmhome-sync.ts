@@ -563,13 +563,14 @@ async function main() {
         await sleep(config.rateLimitMs)
       }
       try {
-        const html = context.body ?? context.$?.html() ?? ''
+        const htmlRaw = context.body ?? context.$?.html() ?? ''
+        const html = typeof htmlRaw === 'string' ? htmlRaw : htmlRaw.toString('utf8')
         const authReason = html ? detectNeedAuth(html) : null
         if (authReason) {
           await markNeedAuth(authReason, context.request.url)
           return
         }
-        await processPage(context.$, {
+        await processPage(context.$ as any, {
           url: context.request.url,
           userData: context.request.userData as RequestContext,
         })
@@ -591,7 +592,6 @@ async function main() {
       requestQueue,
       maxConcurrency: config.maxConcurrency,
       useSessionPool: false,
-      useIncognitoPages: false,
       launchContext: {
         userDataDir: resolvedUserDataDir,
         launchOptions: {
@@ -676,7 +676,7 @@ async function main() {
     reporter.log('Report saved.')
 
     const hiddenTotal = totals.hiddenNoPrice + totals.hiddenZeroPrice
-    let finalStatus = BmhomeSyncStatus.SUCCESS
+    let finalStatus: BmhomeSyncStatus = BmhomeSyncStatus.SUCCESS
     let summaryRu = config.dryRun
       ? `Dry-run завершен. Найдено ${totals.productsFound}, создано ${totals.created}, обновлено ${totals.updated}, скрыто ${hiddenTotal}.`
       : `Синхронизация завершена. Найдено ${totals.productsFound}, создано ${totals.created}, обновлено ${totals.updated}, скрыто ${hiddenTotal}.`
