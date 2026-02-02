@@ -41,6 +41,16 @@ type StatusResponse = {
   warningRu?: string | null
 }
 
+type TranslateStatus = {
+  running: boolean
+  progress: {
+    done: number
+    total: number
+  }
+  stage: string
+  logTail: string
+}
+
 const statusLabels: Record<SyncRun['status'], string> = {
   RUNNING: 'В процессе',
   SUCCESS: 'Успешно',
@@ -85,6 +95,8 @@ export default function BmhomeSyncPanel() {
   const [translateRunning, setTranslateRunning] = useState(false)
   const [translateMessage, setTranslateMessage] = useState<string | null>(null)
   const [translateError, setTranslateError] = useState<string | null>(null)
+  const [translateJobId, setTranslateJobId] = useState<string | null>(null)
+  const [translateStatus, setTranslateStatus] = useState<TranslateStatus | null>(null)
 
   const loadStatus = useCallback(async () => {
     const response = await fetch('/api/admin/bmhome-sync/status', { cache: 'no-store' })
@@ -122,6 +134,14 @@ export default function BmhomeSyncPanel() {
     reloadAll()
   }, [reloadAll])
 
+  useEffect(() => {
+    if (!running) return
+    const interval = setInterval(() => {
+      loadStatus().catch(() => null)
+    }, 2500)
+    return () => clearInterval(interval)
+  }, [running, loadStatus])
+
   const startSync = async () => {
     try {
       setStarting(true)
@@ -130,6 +150,7 @@ export default function BmhomeSyncPanel() {
         const data = await response.json().catch(() => ({}))
         throw new Error(data?.error || 'Не удалось запустить синхронизацию')
       }
+      setRunning(true)
       await reloadAll()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка запуска синхронизации')
@@ -160,12 +181,43 @@ export default function BmhomeSyncPanel() {
       }
       const logInfo = data?.logFile ? ` (${data.logFile})` : ''
       setTranslateMessage(`Перевод запущен${logInfo}`)
+      setTranslateJobId(data?.jobId || null)
+      setTranslateStatus(null)
     } catch (err) {
       setTranslateError(err instanceof Error ? err.message : 'Ошибка запуска перевода')
     } finally {
       setTranslateRunning(false)
     }
   }
+
+  useEffect(() => {
+    if (!translateJobId) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const response = await fetch(
+          `/api/admin/bmhome-sync/translate-ru/status?jobId=${encodeURIComponent(translateJobId)}`,
+          { cache: 'no-store' }
+        )
+        if (!response.ok) return
+        const data = (await response.json()) as TranslateStatus
+        if (!cancelled) {
+          setTranslateStatus(data)
+          if (!data.running) {
+            setTranslateRunning(false)
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }
+    poll()
+    const interval = setInterval(poll, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [translateJobId])
 
 
   const saveSettings = async () => {
@@ -440,6 +492,40 @@ export default function BmhomeSyncPanel() {
         {translateMessage && (
           <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-md px-4 py-2">
             {translateMessage}
+          </div>
+        )}
+        {translateStatus && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm text-gray-700">
+              <span>
+                Статус: {translateStatus.running ? 'running' : 'stopped'}
+                {translateStatus.stage ? ` · ${translateStatus.stage}` : ''}
+              </span>
+              <span>
+                {translateStatus.progress.done}/{translateStatus.progress.total}
+              </span>
+            </div>
+            <div className="h-2 w-full rounded bg-gray-100 overflow-hidden">
+              <div
+                className="h-full bg-green-600 transition-all"
+                style={{
+                  width:
+                    translateStatus.progress.total > 0
+                      ? `${Math.min(
+                          100,
+                          Math.round(
+                            (translateStatus.progress.done / translateStatus.progress.total) * 100
+                          )
+                        )}%`
+                      : '0%',
+                }}
+              />
+            </div>
+            {translateStatus.logTail && (
+              <pre className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap">
+                {translateStatus.logTail}
+              </pre>
+            )}
           </div>
         )}
         <div className="flex justify-end">

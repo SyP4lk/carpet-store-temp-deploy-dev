@@ -55,6 +55,24 @@ const translateTechnicalDetails = parseFlag(process.env.BMHOME_TRANSLATE_TECH, t
 const translateLists = parseFlag(process.env.BMHOME_TRANSLATE_LISTS, true)
 const translateTaxonomy = parseFlag(process.env.BMHOME_TRANSLATE_TAXONOMY, false)
 
+function needsRuOverwrite(ruText?: string | null, enText?: string | null): boolean {
+  const ru = (ruText ?? '').trim()
+  const en = (enText ?? '').trim()
+  if (!ru) return true
+  if (ru === en) return true
+  return !/[А-Яа-яЁё]/.test(ru)
+}
+
+function needsRuListOverwrite(ruList?: string[] | null, enList?: string[] | null): boolean {
+  const ru = (ruList ?? []).filter(Boolean)
+  const en = (enList ?? []).filter(Boolean)
+  if (ru.length === 0) return true
+  const ruJoined = ru.join(' ').trim()
+  const enJoined = en.join(' ').trim()
+  if (ruJoined === enJoined) return true
+  return !/[А-Яа-яЁё]/.test(ruJoined)
+}
+
 const glossaryEntries: Array<[string, string]> = [
   ['Pile height', 'Высота ворса'],
   ['Total height', 'Общая высота'],
@@ -257,9 +275,12 @@ async function main() {
     },
   })
 
+  console.log(`TOTAL=${products.length}`)
+
   let translatedCount = 0
   let skippedCount = 0
   let errorCount = 0
+  let processedCount = 0
 
   for (const product of products) {
     try {
@@ -295,6 +316,11 @@ async function main() {
         collections: collections.filter((c) => c.locale === 'en').map((c) => c.name),
         styles: styles.filter((c) => c.locale === 'en').map((c) => c.name),
       }
+      const taxonomyRu = {
+        colors: colors.filter((c) => c.locale === 'ru').map((c) => c.name),
+        collections: collections.filter((c) => c.locale === 'ru').map((c) => c.name),
+        styles: styles.filter((c) => c.locale === 'ru').map((c) => c.name),
+      }
 
       if (
         !bmhome.descriptionHtml &&
@@ -309,6 +335,12 @@ async function main() {
         skippedCount += 1
         continue
       }
+
+      const baseDescription = descriptionEn || htmlToText(bmhome.descriptionHtml || bmhome.shortHtml || '')
+      const forceOverwriteDesc = needsRuOverwrite(descriptionRu, baseDescription)
+      const forceOverwriteHead = needsRuOverwrite(featureRu?.head, featureHead)
+      const forceOverwriteCare = needsRuListOverwrite(featureRu?.careAndWarranty, careList)
+      const forceOverwriteTechnical = needsRuListOverwrite(featureRu?.technicalInfo, technicalList)
 
       const currentHash = buildBmhomeTranslationHash({
         bmhome,
@@ -326,33 +358,48 @@ async function main() {
       const hasListSource = careList.length > 0 || technicalList.length > 0
       const hasTechSource =
         Array.isArray(bmhome.technicalDetails) && bmhome.technicalDetails.length > 0
+      const techValuesEn = hasTechSource
+        ? bmhome.technicalDetails?.map((detail) => detail.value ?? '').filter(Boolean) ?? []
+        : []
+      const techValuesRu = Array.isArray(bmhome.technicalDetailsRu)
+        ? bmhome.technicalDetailsRu?.map((detail) => detail.value ?? '').filter(Boolean) ?? []
+        : []
+      const forceOverwriteTech = needsRuListOverwrite(techValuesRu, techValuesEn)
       const hasTaxonomySource =
         taxonomyEn.colors.length > 0 ||
         taxonomyEn.collections.length > 0 ||
         taxonomyEn.styles.length > 0
 
-      const shouldDesc =
-        translateDescriptions &&
-        hasDescSource &&
-        (hashChanged || !baseScopes.descriptions || !descriptionRu)
-      const shouldLists =
-        translateLists && hasListSource && (hashChanged || !baseScopes.lists || !featureRu)
+      const shouldDesc = translateDescriptions && hasDescSource && (forceOverwriteDesc || !descriptionRu)
       const shouldTech =
         translateTechnicalDetails &&
         hasTechSource &&
-        (hashChanged || !baseScopes.technicalDetails || !bmhome.technicalDetailsRu)
-      const shouldTax =
-        translateTaxonomy && hasTaxonomySource && (hashChanged || !baseScopes.taxonomy)
+        (!bmhome.technicalDetailsRu || forceOverwriteTech)
+      const shouldUpdateHead =
+        translateDescriptions && (forceOverwriteHead || forceOverwriteDesc || !featureRu)
+      const shouldUpdateCare =
+        translateLists && hasListSource && (forceOverwriteCare || !featureRu)
+      const shouldUpdateTechnicalList =
+        translateLists && hasListSource && (forceOverwriteTechnical || !featureRu)
+      const shouldLists = shouldUpdateCare || shouldUpdateTechnicalList
+      const forceOverwriteTax =
+        needsRuListOverwrite(taxonomyRu.colors, taxonomyEn.colors) ||
+        needsRuListOverwrite(taxonomyRu.collections, taxonomyEn.collections) ||
+        needsRuListOverwrite(taxonomyRu.styles, taxonomyEn.styles)
+      const shouldTax = translateTaxonomy && hasTaxonomySource && forceOverwriteTax
 
       if (!shouldDesc && !shouldLists && !shouldTech && !shouldTax) {
         skippedCount += 1
+        processedCount += 1
+        if (processedCount % 10 === 0 || processedCount === products.length) {
+          console.log(`PROGRESS done=${processedCount} total=${products.length} stage="skipping"`)
+        }
         continue
       }
 
       const updates: Prisma.PrismaPromise<any>[] = []
 
       if (shouldDesc) {
-        const baseDescription = descriptionEn || htmlToText(bmhome.descriptionHtml || bmhome.shortHtml || '')
         const ruDescription = await translateText(baseDescription, 'text')
         updates.push(
           prisma.description.upsert({
@@ -363,17 +410,16 @@ async function main() {
         )
       }
 
-      const shouldUpdateFeatures =
-        (translateDescriptions && (shouldDesc || !featureRu)) || (translateLists && (shouldLists || !featureRu))
+      const shouldUpdateFeatures = shouldUpdateHead || shouldUpdateCare || shouldUpdateTechnicalList
       if (shouldUpdateFeatures) {
         const headBase = featureRu?.head || featureHead
         const careBase = featureRu?.careAndWarranty || careList
         const technicalBase = featureRu?.technicalInfo || technicalList
-        const ruHead = translateDescriptions ? await translateText(featureHead, 'text') : headBase
-        const ruCare = translateLists
+        const ruHead = shouldUpdateHead ? await translateText(featureHead, 'text') : headBase
+        const ruCare = shouldUpdateCare
           ? await Promise.all(careList.map((item) => translateText(item, 'text')))
           : careBase
-        const ruTechnical = translateLists
+        const ruTechnical = shouldUpdateTechnicalList
           ? await Promise.all(technicalList.map((item) => translateText(item, 'text')))
           : technicalBase
         updates.push(
@@ -492,12 +538,17 @@ async function main() {
       }
 
       translatedCount += 1
-      if (translatedCount % 50 === 0) {
-        console.log(`Translated ${translatedCount}/${products.length}`)
+      processedCount += 1
+      if (processedCount % 10 === 0 || processedCount === products.length) {
+        console.log(`PROGRESS done=${processedCount} total=${products.length} stage="translating"`)
       }
     } catch (error) {
       errorCount += 1
       console.error(`Failed to translate ${product.productCode}:`, (error as Error).message)
+      processedCount += 1
+      if (processedCount % 10 === 0 || processedCount === products.length) {
+        console.log(`PROGRESS done=${processedCount} total=${products.length} stage="error"`)
+      }
     }
   }
 

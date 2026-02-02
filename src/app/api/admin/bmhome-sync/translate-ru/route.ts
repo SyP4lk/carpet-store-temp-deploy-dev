@@ -35,8 +35,9 @@ export async function POST(req: Request) {
 
   const logsDir = path.join(process.cwd(), 'logs')
   fs.mkdirSync(logsDir, { recursive: true })
-  const fileName = `bmhome-translate-ru_${new Date().toISOString().replace(/[:.]/g, '-')}.log`
-  const logFile = path.join(logsDir, fileName)
+  const jobId = `bmhome-translate-ru_${new Date().toISOString().replace(/[:.]/g, '-')}`
+  const logFile = path.join(logsDir, `${jobId}.log`)
+  const pidFile = path.join(logsDir, `${jobId}.pid`)
 
   const out = fs.openSync(logFile, 'a')
   const err = fs.openSync(logFile, 'a')
@@ -59,10 +60,13 @@ export async function POST(req: Request) {
   })
 
   child.unref()
+  fs.writeFileSync(pidFile, String(child.pid ?? ''))
 
   return NextResponse.json({
     success: true,
     message: 'BMHOME RU translate started',
-    logFile: path.join('logs', fileName),
+    jobId,
+    startedAt: new Date().toISOString(),
+    logFile: path.join('logs', `${jobId}.log`),
   })
 }
