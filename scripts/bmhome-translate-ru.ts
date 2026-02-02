@@ -8,14 +8,25 @@ type TechnicalDetail = {
   value?: string
 }
 
+type TranslationScopes = {
+  descriptions?: boolean
+  technicalDetails?: boolean
+  lists?: boolean
+  taxonomy?: boolean
+}
+
 type BmhomeMeta = {
   shortHtml?: string | null
   descriptionHtml?: string | null
   technicalDetails?: TechnicalDetail[]
+  shortHtmlRu?: string | null
+  descriptionHtmlRu?: string | null
+  technicalDetailsRu?: TechnicalDetail[]
   translation?: {
     enHash?: string
     updatedAt?: string
     mode?: string
+    scopes?: TranslationScopes
   }
 }
 
@@ -26,6 +37,23 @@ const translateEndpoint = translateUrlRaw
     ? translateUrlRaw
     : `${translateUrlRaw.replace(/\/$/, '')}/translate`
   : null
+
+type TranslateMode = 'translate' | 'copy_en'
+
+function parseFlag(value: string | undefined, fallback: boolean): boolean {
+  if (!value) return fallback
+  const normalized = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'y'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'n'].includes(normalized)) return false
+  return fallback
+}
+
+const translateMode: TranslateMode =
+  (process.env.BMHOME_TRANSLATE_MODE || '').toLowerCase() === 'copy_en' ? 'copy_en' : 'translate'
+const translateDescriptions = parseFlag(process.env.BMHOME_TRANSLATE_DESC, true)
+const translateTechnicalDetails = parseFlag(process.env.BMHOME_TRANSLATE_TECH, true)
+const translateLists = parseFlag(process.env.BMHOME_TRANSLATE_LISTS, true)
+const translateTaxonomy = parseFlag(process.env.BMHOME_TRANSLATE_TAXONOMY, false)
 
 const glossaryEntries: Array<[string, string]> = [
   ['Pile height', 'Высота ворса'],
@@ -119,6 +147,7 @@ async function translateWithLibre(text: string, format: 'text' | 'html') {
 
 async function translateText(input: string, format: 'text' | 'html' = 'text') {
   if (!input || !input.trim()) return input
+  if (translateMode === 'copy_en') return input
   const { text: protectedText, placeholders } = protectPlaceholders(input)
   let result = protectedText
 
@@ -171,22 +200,48 @@ function extractFeatureLists(html: string) {
   return { care, technical }
 }
 
-function buildBmhomeTranslationHash(data: BmhomeMeta): string {
+function buildBmhomeTranslationHash(params: {
+  bmhome: BmhomeMeta
+  featureHead?: string
+  care?: string[]
+  technical?: string[]
+  taxonomy?: {
+    colors?: string[]
+    collections?: string[]
+    styles?: string[]
+  }
+}): string {
   const payload = JSON.stringify({
-    shortHtml: data.shortHtml ?? '',
-    descriptionHtml: data.descriptionHtml ?? '',
+    shortHtml: params.bmhome.shortHtml ?? '',
+    descriptionHtml: params.bmhome.descriptionHtml ?? '',
     technicalDetails:
-      data.technicalDetails?.map((detail) => ({
+      params.bmhome.technicalDetails?.map((detail) => ({
         key: detail.key ?? '',
         value: detail.value ?? '',
       })) ?? [],
+    featureHead: params.featureHead ?? '',
+    care: params.care ?? [],
+    technical: params.technical ?? [],
+    taxonomy: {
+      colors: params.taxonomy?.colors ?? [],
+      collections: params.taxonomy?.collections ?? [],
+      styles: params.taxonomy?.styles ?? [],
+    },
   })
   return createHash('sha256').update(payload).digest('hex')
 }
 
 async function main() {
   console.log('BMHOME RU translation started.')
-  console.log(`Translator: ${translateEndpoint ? translateEndpoint : 'glossary-only'}`)
+  console.log(`Mode: ${translateMode}`)
+  console.log(
+    `Translator: ${
+      translateMode === 'translate' ? translateEndpoint || 'glossary-only' : 'copy_en'
+    }`
+  )
+  console.log(
+    `Scopes: desc=${translateDescriptions} tech=${translateTechnicalDetails} lists=${translateLists} taxonomy=${translateTaxonomy}`
+  )
 
   const products = await prisma.product.findMany({
     where: { source: ProductSource.BMHOME },
@@ -194,6 +249,11 @@ async function main() {
       id: true,
       productCode: true,
       sourceMeta: true,
+      descriptions: { select: { locale: true, description: true } },
+      features: { select: { locale: true, head: true, careAndWarranty: true, technicalInfo: true } },
+      colors: { select: { locale: true, name: true, value: true } },
+      collections: { select: { locale: true, name: true, value: true } },
+      styles: { select: { locale: true, name: true, value: true } },
     },
   })
 
@@ -205,52 +265,214 @@ async function main() {
     try {
       const sourceMeta = (product.sourceMeta ?? {}) as Record<string, any>
       const bmhome = (sourceMeta.bmhome ?? {}) as BmhomeMeta
-      if (!bmhome.descriptionHtml && !bmhome.shortHtml && !bmhome.technicalDetails) {
+
+      const descriptions = product.descriptions ?? []
+      const features = product.features ?? []
+      const colors = product.colors ?? []
+      const collections = product.collections ?? []
+      const styles = product.styles ?? []
+
+      const descriptionEn = descriptions.find((d) => d.locale === 'en')?.description ?? ''
+      const descriptionRu = descriptions.find((d) => d.locale === 'ru')?.description ?? ''
+      const featureEn = features.find((f) => f.locale === 'en')
+      const featureRu = features.find((f) => f.locale === 'ru')
+
+      let careList = featureEn?.careAndWarranty ?? []
+      let technicalList = featureEn?.technicalInfo ?? []
+      if (careList.length === 0 && technicalList.length === 0 && bmhome.descriptionHtml) {
+        const extracted = extractFeatureLists(bmhome.descriptionHtml)
+        careList = extracted.care
+        technicalList = extracted.technical
+      }
+
+      const featureHead =
+        featureEn?.head ||
+        descriptionEn ||
+        htmlToText(bmhome.shortHtml || bmhome.descriptionHtml || '')
+
+      const taxonomyEn = {
+        colors: colors.filter((c) => c.locale === 'en').map((c) => c.name),
+        collections: collections.filter((c) => c.locale === 'en').map((c) => c.name),
+        styles: styles.filter((c) => c.locale === 'en').map((c) => c.name),
+      }
+
+      if (
+        !bmhome.descriptionHtml &&
+        !bmhome.shortHtml &&
+        !bmhome.technicalDetails &&
+        careList.length === 0 &&
+        technicalList.length === 0 &&
+        taxonomyEn.colors.length === 0 &&
+        taxonomyEn.collections.length === 0 &&
+        taxonomyEn.styles.length === 0
+      ) {
         skippedCount += 1
         continue
       }
 
-      const currentHash = buildBmhomeTranslationHash(bmhome)
+      const currentHash = buildBmhomeTranslationHash({
+        bmhome,
+        featureHead,
+        care: careList,
+        technical: technicalList,
+        taxonomy: taxonomyEn,
+      })
       const existingHash = bmhome.translation?.enHash
-      if (existingHash && existingHash === currentHash) {
+      const hashChanged = !existingHash || existingHash !== currentHash
+      const existingScopes = bmhome.translation?.scopes ?? {}
+      const baseScopes: TranslationScopes = hashChanged ? {} : { ...existingScopes }
+
+      const hasDescSource = Boolean(descriptionEn) || Boolean(bmhome.shortHtml) || Boolean(bmhome.descriptionHtml)
+      const hasListSource = careList.length > 0 || technicalList.length > 0
+      const hasTechSource =
+        Array.isArray(bmhome.technicalDetails) && bmhome.technicalDetails.length > 0
+      const hasTaxonomySource =
+        taxonomyEn.colors.length > 0 ||
+        taxonomyEn.collections.length > 0 ||
+        taxonomyEn.styles.length > 0
+
+      const shouldDesc =
+        translateDescriptions &&
+        hasDescSource &&
+        (hashChanged || !baseScopes.descriptions || !descriptionRu)
+      const shouldLists =
+        translateLists && hasListSource && (hashChanged || !baseScopes.lists || !featureRu)
+      const shouldTech =
+        translateTechnicalDetails &&
+        hasTechSource &&
+        (hashChanged || !baseScopes.technicalDetails || !bmhome.technicalDetailsRu)
+      const shouldTax =
+        translateTaxonomy && hasTaxonomySource && (hashChanged || !baseScopes.taxonomy)
+
+      if (!shouldDesc && !shouldLists && !shouldTech && !shouldTax) {
         skippedCount += 1
         continue
       }
 
-      const descriptionHtml = bmhome.descriptionHtml || ''
-      const shortHtml = bmhome.shortHtml || ''
-      const descriptionText = htmlToText(descriptionHtml || shortHtml || '')
-      const shortText = htmlToText(shortHtml || descriptionHtml || '')
-      const featureHead = shortText || descriptionText
-      const { care, technical } = extractFeatureLists(descriptionHtml || '')
-      const technicalDetails = Array.isArray(bmhome.technicalDetails) ? bmhome.technicalDetails : []
+      const updates: Prisma.PrismaPromise<any>[] = []
 
-      const ruDescription = translateEndpoint ? await translateText(descriptionText, 'text') : descriptionText
-      const ruHead = translateEndpoint ? await translateText(featureHead, 'text') : featureHead
+      if (shouldDesc) {
+        const baseDescription = descriptionEn || htmlToText(bmhome.descriptionHtml || bmhome.shortHtml || '')
+        const ruDescription = await translateText(baseDescription, 'text')
+        updates.push(
+          prisma.description.upsert({
+            where: { productId_locale: { productId: product.id, locale: 'ru' } },
+            update: { description: ruDescription },
+            create: { productId: product.id, locale: 'ru', description: ruDescription },
+          })
+        )
+      }
 
-      const ruCare = await Promise.all(care.map((item) => translateText(item, 'text')))
-      const ruTechnical = await Promise.all(technical.map((item) => translateText(item, 'text')))
-
-      const ruTechnicalDetails = await Promise.all(
-        technicalDetails.map(async (detail) => ({
-          ...detail,
-          value: detail.value ? await translateText(detail.value, 'text') : detail.value,
-        }))
-      )
-
-      const ruShortHtml = translateEndpoint ? await translateText(shortHtml, 'html') : shortHtml
-      const ruDescriptionHtml = translateEndpoint ? await translateText(descriptionHtml, 'html') : descriptionHtml
+      const shouldUpdateFeatures =
+        (translateDescriptions && (shouldDesc || !featureRu)) || (translateLists && (shouldLists || !featureRu))
+      if (shouldUpdateFeatures) {
+        const headBase = featureRu?.head || featureHead
+        const careBase = featureRu?.careAndWarranty || careList
+        const technicalBase = featureRu?.technicalInfo || technicalList
+        const ruHead = translateDescriptions ? await translateText(featureHead, 'text') : headBase
+        const ruCare = translateLists
+          ? await Promise.all(careList.map((item) => translateText(item, 'text')))
+          : careBase
+        const ruTechnical = translateLists
+          ? await Promise.all(technicalList.map((item) => translateText(item, 'text')))
+          : technicalBase
+        updates.push(
+          prisma.feature.upsert({
+            where: { productId_locale: { productId: product.id, locale: 'ru' } },
+            update: {
+              head: ruHead,
+              careAndWarranty: ruCare,
+              technicalInfo: ruTechnical,
+            },
+            create: {
+              productId: product.id,
+              locale: 'ru',
+              head: ruHead,
+              careAndWarranty: ruCare,
+              technicalInfo: ruTechnical,
+            },
+          })
+        )
+      }
 
       const updatedBmhome: BmhomeMeta & Record<string, unknown> = {
         ...bmhome,
-        shortHtmlRu: ruShortHtml,
-        descriptionHtmlRu: ruDescriptionHtml,
-        technicalDetailsRu: ruTechnicalDetails,
-        translation: {
-          enHash: currentHash,
-          updatedAt: new Date().toISOString(),
-          mode: translateEndpoint ? 'libretranslate' : 'glossary',
-        },
+      }
+
+      if (shouldDesc) {
+        updatedBmhome.shortHtmlRu = await translateText(bmhome.shortHtml ?? '', 'html')
+        updatedBmhome.descriptionHtmlRu = await translateText(bmhome.descriptionHtml ?? '', 'html')
+      }
+
+      if (shouldTech) {
+        const technicalDetails = Array.isArray(bmhome.technicalDetails) ? bmhome.technicalDetails : []
+        updatedBmhome.technicalDetailsRu = await Promise.all(
+          technicalDetails.map(async (detail) => ({
+            ...detail,
+            value: detail.value ? await translateText(detail.value, 'text') : detail.value,
+          }))
+        )
+      }
+
+      if (shouldTax) {
+        const colorEn = colors.find((c) => c.locale === 'en')
+        const collectionEn = collections.find((c) => c.locale === 'en')
+        const styleEn = styles.find((c) => c.locale === 'en')
+
+        if (colorEn) {
+          const ruName = await translateText(colorEn.name, 'text')
+          updates.push(
+            prisma.productColor.upsert({
+              where: { productId_locale: { productId: product.id, locale: 'ru' } },
+              update: { name: ruName, value: colorEn.value },
+              create: { productId: product.id, locale: 'ru', name: ruName, value: colorEn.value },
+            })
+          )
+        }
+        if (collectionEn) {
+          const ruName = await translateText(collectionEn.name, 'text')
+          updates.push(
+            prisma.productCollection.upsert({
+              where: { productId_locale: { productId: product.id, locale: 'ru' } },
+              update: { name: ruName, value: collectionEn.value },
+              create: {
+                productId: product.id,
+                locale: 'ru',
+                name: ruName,
+                value: collectionEn.value,
+              },
+            })
+          )
+        }
+        if (styleEn) {
+          const ruName = await translateText(styleEn.name, 'text')
+          updates.push(
+            prisma.productStyle.upsert({
+              where: { productId_locale: { productId: product.id, locale: 'ru' } },
+              update: { name: ruName, value: styleEn.value },
+              create: { productId: product.id, locale: 'ru', name: ruName, value: styleEn.value },
+            })
+          )
+        }
+      }
+
+      const nextScopes: TranslationScopes = {
+        descriptions: hashChanged ? false : Boolean(baseScopes.descriptions),
+        technicalDetails: hashChanged ? false : Boolean(baseScopes.technicalDetails),
+        lists: hashChanged ? false : Boolean(baseScopes.lists),
+        taxonomy: hashChanged ? false : Boolean(baseScopes.taxonomy),
+      }
+      if (shouldDesc) nextScopes.descriptions = true
+      if (shouldTech) nextScopes.technicalDetails = true
+      if (shouldLists) nextScopes.lists = true
+      if (shouldTax) nextScopes.taxonomy = true
+
+      updatedBmhome.translation = {
+        ...(bmhome.translation ?? {}),
+        enHash: currentHash,
+        updatedAt: new Date().toISOString(),
+        mode: translateMode,
+        scopes: nextScopes,
       }
 
       const updatedSourceMeta = {
@@ -258,33 +480,16 @@ async function main() {
         bmhome: updatedBmhome,
       } as Prisma.InputJsonValue
 
-
-      await prisma.$transaction([
+      updates.push(
         prisma.product.update({
           where: { id: product.id },
           data: { sourceMeta: updatedSourceMeta },
-        }),
-        prisma.description.upsert({
-          where: { productId_locale: { productId: product.id, locale: 'ru' } },
-          update: { description: ruDescription },
-          create: { productId: product.id, locale: 'ru', description: ruDescription },
-        }),
-        prisma.feature.upsert({
-          where: { productId_locale: { productId: product.id, locale: 'ru' } },
-          update: {
-            head: ruHead,
-            careAndWarranty: ruCare,
-            technicalInfo: ruTechnical,
-          },
-          create: {
-            productId: product.id,
-            locale: 'ru',
-            head: ruHead,
-            careAndWarranty: ruCare,
-            technicalInfo: ruTechnical,
-          },
-        }),
-      ])
+        })
+      )
+
+      if (updates.length > 0) {
+        await prisma.$transaction(updates)
+      }
 
       translatedCount += 1
       if (translatedCount % 50 === 0) {

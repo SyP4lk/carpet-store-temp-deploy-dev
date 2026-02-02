@@ -44,9 +44,19 @@ export interface RugProduct {
   isRunners:boolean
   inStock:boolean
   sourceMeta?: {
-    bmhome?: {
-      priceOnRequest?: boolean;
-      productUrl?: string;
-    };
+  bmhome?: {
+    priceOnRequest?: boolean;
+    productUrl?: string;
+    variants?: Array<{
+      variationId?: string;
+      sku?: string;          // StokKodu
+      barcode?: string;
+      sizeLabel?: string;
+      isActive?: boolean;
+      stockStatus?: string;
+      salePriceUsd?: string;
+      discountPriceUsd?: string;
+    }>;
   };
+};
 }

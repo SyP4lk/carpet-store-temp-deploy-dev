@@ -77,6 +77,14 @@ export default function BmhomeSyncPanel() {
   const [starting, setStarting] = useState(false)
   const [settingsDraft, setSettingsDraft] = useState<SyncSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [trMode, setTrMode] = useState<'translate' | 'copy_en'>('translate')
+  const [trDesc, setTrDesc] = useState(true)
+  const [trTech, setTrTech] = useState(true)
+  const [trLists, setTrLists] = useState(true)
+  const [trTaxonomy, setTrTaxonomy] = useState(false)
+  const [translateRunning, setTranslateRunning] = useState(false)
+  const [translateMessage, setTranslateMessage] = useState<string | null>(null)
+  const [translateError, setTranslateError] = useState<string | null>(null)
 
   const loadStatus = useCallback(async () => {
     const response = await fetch('/api/admin/bmhome-sync/status', { cache: 'no-store' })
@@ -129,6 +137,36 @@ export default function BmhomeSyncPanel() {
       setStarting(false)
     }
   }
+
+  const startTranslate = async () => {
+    try {
+      setTranslateRunning(true)
+      setTranslateMessage(null)
+      setTranslateError(null)
+      const response = await fetch('/api/admin/bmhome-sync/translate-ru', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: trMode,
+          translateDescriptions: trDesc,
+          translateTechnicalDetails: trTech,
+          translateLists: trLists,
+          translateTaxonomy: trTaxonomy,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data?.error || 'Не удалось запустить перевод')
+      }
+      const logInfo = data?.logFile ? ` (${data.logFile})` : ''
+      setTranslateMessage(`Перевод запущен${logInfo}`)
+    } catch (err) {
+      setTranslateError(err instanceof Error ? err.message : 'Ошибка запуска перевода')
+    } finally {
+      setTranslateRunning(false)
+    }
+  }
+
 
   const saveSettings = async () => {
     if (!settingsDraft) return
@@ -339,6 +377,78 @@ export default function BmhomeSyncPanel() {
             className="px-4 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
           >
             {saving ? 'Сохранение...' : 'Сохранить настройки'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-6 space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Перевод RU</h3>
+          <p className="text-sm text-gray-500">
+            Выберите режим и что переводить. Запуск в фоне, лог пишется в /logs.
+          </p>
+        </div>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-700">Режим</p>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="radio"
+                name="translate-mode"
+                value="translate"
+                checked={trMode === 'translate'}
+                onChange={() => setTrMode('translate')}
+              />
+              Показывать перевод (RU)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="radio"
+                name="translate-mode"
+                value="copy_en"
+                checked={trMode === 'copy_en'}
+                onChange={() => setTrMode('copy_en')}
+              />
+              Показывать оригинал EN (копировать EN → RU)
+            </label>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-gray-700">Что переводить</p>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={trDesc} onChange={(e) => setTrDesc(e.target.checked)} />
+              Descriptions / shortHtml
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={trTech} onChange={(e) => setTrTech(e.target.checked)} />
+              Technical details
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={trLists} onChange={(e) => setTrLists(e.target.checked)} />
+              CARE AND WARRANTY / TECHNICAL INFORMATION
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={trTaxonomy} onChange={(e) => setTrTaxonomy(e.target.checked)} />
+              Taxonomy (collection / style / color)
+            </label>
+          </div>
+        </div>
+        {translateError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-4 py-2">
+            {translateError}
+          </div>
+        )}
+        {translateMessage && (
+          <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-md px-4 py-2">
+            {translateMessage}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            onClick={startTranslate}
+            disabled={translateRunning}
+            className="px-4 py-2 rounded-md bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+          >
+            {translateRunning ? 'Перевод запущен...' : 'Запустить перевод RU'}
           </button>
         </div>
       </div>

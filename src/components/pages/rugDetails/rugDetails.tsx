@@ -22,7 +22,29 @@ type Props = {
 
 const RugDetails: FC<Props> = ({ rug, locale }) => {
   const searchParams = useSearchParams();
-  const stockCode = getDisplaySku(rug) || "N/A";
+
+const selectedSize = useMemo(() => {
+  try {
+    const sizeParam = searchParams?.get("size");
+    const widthParam = searchParams?.get("width");
+    const heightParam = searchParams?.get("height");
+
+    let s = rug.defaultSize || rug.sizes[0] || "";
+
+    if (sizeParam) {
+      s = sizeParam;
+    } else if (widthParam && heightParam) {
+      s = `${widthParam} x ${heightParam} cm`;
+    }
+
+    return s;
+  } catch {
+    return rug.defaultSize || rug.sizes?.[0] || "";
+  }
+}, [rug.defaultSize, rug.sizes, searchParams]);
+
+const stockCode = useMemo(() => getDisplaySku(rug, selectedSize) || "N/A", [rug, selectedSize]);
+
   const description = rug.description?.[locale] || "";
   const name = rug.product_name?.[locale] || "Unnamed Product";
   const features = rug.features?.[locale];
@@ -40,26 +62,13 @@ const RugDetails: FC<Props> = ({ rug, locale }) => {
     }
 
     try {
-      const sizeParam = searchParams?.get("size");
-      const widthParam = searchParams?.get("width");
-      const heightParam = searchParams?.get("height");
-
-      // Используем defaultSize если есть, иначе первый размер из списка
-      let selectedSize = rug.defaultSize || rug.sizes[0];
-
-      // Если есть параметры в URL, они имеют приоритет
-      if (sizeParam) {
-        selectedSize = sizeParam;
-      } else if (widthParam && heightParam) {
-        selectedSize = `${widthParam}x${heightParam} cm`;
-      }
-
       return calculateRugPrice(basePrice, rug.sizes, selectedSize);
     } catch (error) {
       console.error("Price calculation error:", error);
       return basePrice;
     }
-  }, [basePrice, rug.sizes, rug.defaultSize, searchParams]);
+  }, [basePrice, rug.sizes, selectedSize]);
+
 
   return (
     <StockProvider productCodes={[rug.product_code]}>

@@ -241,7 +241,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
 
             {/* Показываем информацию о товаре */}
             <div className="mb-3 p-3 bg-gray-50 rounded text-sm">
-              <p><strong>{dictionary?.cart.order.stock || 'Артикул'}:</strong> {getDisplaySku(rug)}</p>
+              <p><strong>{dictionary?.cart.order.stock || 'Артикул'}:</strong> {getDisplaySku(rug, selectedSize)}</p>
               <p><strong>{locale === 'ru' ? 'Размер' : 'Size'}:</strong> {selectedSize}</p>
               <p><strong>{dictionary?.cart.quantity || 'Количество'}:</strong> {quantity}</p>
             </div>

@@ -232,6 +232,14 @@ function buildBmhomeTranslationHash(data: {
   shortHtml?: string | null
   descriptionHtml?: string | null
   technicalDetails?: TechnicalDetail[]
+  featureHead?: string
+  care?: string[]
+  technical?: string[]
+  taxonomy?: {
+    colors?: string[]
+    collections?: string[]
+    styles?: string[]
+  }
 }): string {
   const payload = JSON.stringify({
     shortHtml: data.shortHtml ?? '',
@@ -241,6 +249,14 @@ function buildBmhomeTranslationHash(data: {
         key: detail.key ?? '',
         value: detail.value ?? '',
       })) ?? [],
+    featureHead: data.featureHead ?? '',
+    care: data.care ?? [],
+    technical: data.technical ?? [],
+    taxonomy: {
+      colors: data.taxonomy?.colors ?? [],
+      collections: data.taxonomy?.collections ?? [],
+      styles: data.taxonomy?.styles ?? [],
+    },
   })
   return createHash('sha256').update(payload).digest('hex')
 }
@@ -593,6 +609,9 @@ async function main() {
         sourceMeta: true,
         descriptions: { where: { locale: 'ru' }, select: { id: true } },
         features: { where: { locale: 'ru' }, select: { id: true } },
+        colors: { where: { locale: 'ru' }, select: { id: true } },
+        collections: { where: { locale: 'ru' }, select: { id: true } },
+        styles: { where: { locale: 'ru' }, select: { id: true } },
       },
     })
 
@@ -603,14 +622,39 @@ async function main() {
       shortHtml: product.shortHtml,
       descriptionHtml: product.descriptionHtml,
       technicalDetails: product.technicalDetails,
+      featureHead,
+      care,
+      technical,
+      taxonomy: {
+        colors: colorName ? [colorName] : [],
+        styles: styleName ? [styleName] : [],
+        collections: collectionName ? [collectionName] : [],
+      },
     })
     const hasRuDescription = (existing?.descriptions?.length ?? 0) > 0
     const hasRuFeature = (existing?.features?.length ?? 0) > 0
-    const shouldUpdateRu =
-      !existingTranslationHash ||
-      existingTranslationHash !== currentTranslationHash ||
-      !hasRuDescription ||
-      !hasRuFeature
+    const hasRuColor = (existing?.colors?.length ?? 0) > 0
+    const hasRuCollection = (existing?.collections?.length ?? 0) > 0
+    const hasRuStyle = (existing?.styles?.length ?? 0) > 0
+    const hashChanged = !existingTranslationHash || existingTranslationHash !== currentTranslationHash
+    const shouldUpdateRu = hashChanged || !hasRuDescription || !hasRuFeature
+    const shouldUpdateTaxonomyRu = hashChanged || !hasRuColor || !hasRuCollection || !hasRuStyle
+    const nextTranslation = hashChanged
+      ? {
+          enHash: currentTranslationHash,
+          updatedAt: new Date().toISOString(),
+          mode: 'sync',
+          scopes: {
+            descriptions: false,
+            technicalDetails: false,
+            lists: false,
+            taxonomy: false,
+          },
+        }
+      : {
+          ...(existingBmhomeMeta?.translation ?? {}),
+          enHash: currentTranslationHash,
+        }
 
     const sourceMeta = {
       ...existingMeta,
@@ -625,6 +669,7 @@ async function main() {
         descriptionHtml: product.descriptionHtml,
         technicalDetails: product.technicalDetails,
         priceOnRequest,
+        translation: nextTranslation,
         variants: variantData.map((variant) => ({
           variationId: variant.variationId,
           sku: variant.sku,
@@ -714,29 +759,35 @@ async function main() {
               ],
             },
             colors: {
-              deleteMany: {},
+              deleteMany: shouldUpdateTaxonomyRu ? {} : { locale: 'en' },
               create: colorName
                 ? [
                     { locale: 'en', name: colorName, value: slugify(colorName) },
-                    { locale: 'ru', name: colorName, value: slugify(colorName) },
+                    ...(shouldUpdateTaxonomyRu
+                      ? [{ locale: 'ru', name: colorName, value: slugify(colorName) }]
+                      : []),
                   ]
                 : [],
             },
             collections: {
-              deleteMany: {},
+              deleteMany: shouldUpdateTaxonomyRu ? {} : { locale: 'en' },
               create: collectionName
                 ? [
                     { locale: 'en', name: collectionName, value: slugify(collectionName) },
-                    { locale: 'ru', name: collectionName, value: slugify(collectionName) },
+                    ...(shouldUpdateTaxonomyRu
+                      ? [{ locale: 'ru', name: collectionName, value: slugify(collectionName) }]
+                      : []),
                   ]
                 : [],
             },
             styles: {
-              deleteMany: {},
+              deleteMany: shouldUpdateTaxonomyRu ? {} : { locale: 'en' },
               create: styleName
                 ? [
                     { locale: 'en', name: styleName, value: slugify(styleName) },
-                    { locale: 'ru', name: styleName, value: slugify(styleName) },
+                    ...(shouldUpdateTaxonomyRu
+                      ? [{ locale: 'ru', name: styleName, value: slugify(styleName) }]
+                      : []),
                   ]
                 : [],
             },

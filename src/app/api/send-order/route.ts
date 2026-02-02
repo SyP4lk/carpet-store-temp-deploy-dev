@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDictionary } from "@/localization/dictionary";
 import { Locale } from "@/localization/config";
-import { getBmhomeSkuFromUrl, getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { getDisplaySku, getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
+
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const CHAT_IDS = process.env.TELEGRAM_CHAT_IDS?.split(",").map((id) => id.trim()) || [];
@@ -45,14 +46,24 @@ export async function POST(req: Request) {
 <b>${dict.cart.order.cart}:</b>
 ${cart
   .map((ci: any, i: number) => {
-    const sku = getBmhomeSkuFromUrl(ci.item?.sourceMeta?.bmhome?.productUrl) || ci.item.product_code
-    const priceOnRequest = isPriceOnRequestProduct(ci.item)
+    const rawSize =
+      ci.selectedSize ||
+      ci.size ||
+      ci.item?.defaultSize ||
+      (Array.isArray(ci.item?.sizes) ? ci.item.sizes[0] : null) ||
+      '';
+    const sku = getDisplaySku(ci.item, rawSize) || ci.item.product_code;
+
+    const priceOnRequest = isPriceOnRequestProduct(ci.item);
     const priceLabel = priceOnRequest
       ? getPriceOnRequestLabel(locale)
-      : `${Math.round(ci.totalPrice).toLocaleString('ru-RU')}${currency}`
-    return `${i + 1}) <b>${ci.item.product_name[locale]}</b> (${ci.size || ci.item.sizes[0]} cm)
+      : `${Math.round(ci.totalPrice).toLocaleString("ru-RU")}${currency}`;
+
+    const sizeLabel = rawSize || "";
+
+    return `${i + 1}) <b>${ci.item.product_name[locale]}</b> (${sizeLabel})
    <b>${dict.cart.order.stock}:</b> ${sku}
-   💰 ${dict.cart.order.subtotal}: ${priceLabel}`
+   💰 ${dict.cart.order.subtotal}: ${priceLabel}`;
   })
   .join("\n\n")}
 ━━━━━━━━━━━━━━━
