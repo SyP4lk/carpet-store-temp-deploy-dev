@@ -25,9 +25,11 @@ const RugImages: FC<Props> = ({ rug, locale }) => {
                         alt={`${rug.product_name[locale]}`}
                         width={270}
                         height={387}
-                        priority
+                        priority={index === 0}
                         className="w-full object-cover"
                         sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                        unoptimized={typeof image === "string" && image.includes("ticimax.cloud")}
+                        loading={index === 0 ? "eager" : "lazy"}
                     />
                 </figure>
             ))}

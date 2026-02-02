@@ -23,12 +23,7 @@ export async function getAllProducts(): Promise<RugProduct[]> {
   })
 
   // Дополнительная фильтрация на уровне приложения для товаров с ценой "0"
-  return products
-    .map(transformProduct)
-    .filter(product => {
-      const price = parseFloat(product.price.replace(/,/g, '') || '0');
-      return price > 0;
-    });
+  return products.map(transformProduct);
 }
 
 export async function getProductById(id: number): Promise<RugProduct | null> {
@@ -117,12 +112,7 @@ export async function getProductsByFilter(filter: {
     },
   })
 
-  return products
-    .map(transformProduct)
-    .filter(product => {
-      const price = parseFloat(product.price.replace(/,/g, '') || '0');
-      return price > 0;
-    });
+  return products.map(transformProduct);
 }
 
 function transformProduct(product: any): RugProduct {
@@ -181,6 +171,7 @@ function transformProduct(product: any): RugProduct {
     images: product.images,
     isNew: product.isNew,
     isRunners: product.isRunners,
-    inStock: product.inStock
+    inStock: product.inStock,
+    sourceMeta: product.sourceMeta ?? undefined
   }
 }

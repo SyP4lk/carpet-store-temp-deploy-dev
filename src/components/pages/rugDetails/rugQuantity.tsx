@@ -10,6 +10,7 @@ import { calculateRugPrice } from "@/lib/calculatePrice";
 import { useDictionary } from "@/hooks/useDictionary";
 import { useCurrency } from "@/context/CurrencyContext";
 import { Locale } from "@/localization/config";
+import { getDisplaySku, getPriceOnRequestLabel, getRequestPriceCta, isPriceOnRequestProduct } from "@/lib/productUtils";
 
 type Props = {
   rug: RugProduct;
@@ -63,6 +64,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
   }, [searchParams, rug.sizes, rug.defaultSize]);
 
 
+  const priceOnRequest = isPriceOnRequestProduct(rug);
   const basePrice = typeof rug.price === 'string' ? parseFloat(rug.price.replace(/,/g, '')) : (rug.price ?? 0);
 
   const priceEur = useMemo(() => {
@@ -79,6 +81,9 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
     return Math.round(priceEur * 1.02);
   }, [priceEur, locale, eurToRubRate]);
 
+  const orderPriceEur = priceOnRequest ? 0 : priceEur;
+  const orderDisplayPrice = priceOnRequest ? 0 : displayPrice;
+
   const handleDecrease = () => {
     if (quantity > 1) setQuantity(quantity - 1);
   };
@@ -88,11 +93,12 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
   };
 
   const handleAddToCart = () => {
+    if (priceOnRequest) return;
     // Добавляем товар с обновленной ценой и размером
     const productToAdd = {
       ...rug,
       sizes: [selectedSize],
-      price: priceEur.toString()
+      price: orderPriceEur.toString()
     };
 
     // addToCart принимает только product, quantity управляется внутри
@@ -115,11 +121,11 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
         item: {
           ...rug,
           sizes: [selectedSize],
-          price: priceEur
+          price: orderPriceEur
         },
         quantity: quantity,
         selectedSize: selectedSize,
-        totalPrice: displayPrice * quantity
+        totalPrice: orderDisplayPrice * quantity
       };
 
       const res = await fetch("/api/send-order", {
@@ -132,7 +138,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
           name,
           phone,
           cart: [singleItem],
-          subtotal: displayPrice * quantity,
+          subtotal: orderDisplayPrice * quantity,
         }),
       });
 
@@ -164,7 +170,8 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
 
   return (
     <>
-      <div className="flex items-center space-x-4 mt-4">
+      {!priceOnRequest && (
+        <div className="flex items-center space-x-4 mt-4">
         <div className="flex items-center border overflow-hidden">
           <button onClick={handleDecrease} className="px-3 py-2 cursor-pointer">
             <Minus size={14} />
@@ -186,13 +193,19 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
         </button>
       </div>
 
+      )}
+
+      {priceOnRequest && (
+        <p className="mt-4 text-sm text-gray-600">{getPriceOnRequestLabel(locale)}</p>
+      )}
+
       {/* Кнопка "Оставить заявку" */}
       <button
         onClick={() => setShowModal(true)}
         className="flex items-center justify-center w-full px-4 py-3 mt-4 bg-green-600 text-white rounded hover:bg-green-700 transition"
       >
         <MessageSquare size={18} className="mr-2" />
-        {locale === 'ru' ? 'Оставить заявку' : 'Leave a Request'}
+        {priceOnRequest ? getRequestPriceCta(locale) : locale === 'ru' ? 'Оставить заявку' : 'Leave a Request'}
       </button>
 
       {/* Order Modal */}
@@ -228,7 +241,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
 
             {/* Показываем информацию о товаре */}
             <div className="mb-3 p-3 bg-gray-50 rounded text-sm">
-              <p><strong>{dictionary?.cart.order.stock || 'Артикул'}:</strong> {rug.product_code}</p>
+              <p><strong>{dictionary?.cart.order.stock || 'Артикул'}:</strong> {getDisplaySku(rug)}</p>
               <p><strong>{locale === 'ru' ? 'Размер' : 'Size'}:</strong> {selectedSize}</p>
               <p><strong>{dictionary?.cart.quantity || 'Количество'}:</strong> {quantity}</p>
             </div>
@@ -267,3 +280,4 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
 };
 
 export default RugQuantityAddToCart;
+

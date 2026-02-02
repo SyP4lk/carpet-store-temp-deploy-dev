@@ -30,8 +30,10 @@ const RugColors: FC<Props> = ({ rugs, locale}) => {
                             alt={rug.product_name[locale]}
                             width={270}
                             height={380}
-                            priority
+                            priority={i === 0}
+                            loading={i === 0 ? "eager" : "lazy"}
                             className="w-full object-cover"
+                            unoptimized={typeof rug.images?.[0] === "string" && rug.images[0].includes("ticimax.cloud")}
                             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                             onClick={() => {
                                 nProgress.start()

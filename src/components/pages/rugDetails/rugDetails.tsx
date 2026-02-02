@@ -12,6 +12,7 @@ import { useSearchParams } from "next/navigation";
 import { calculateRugPrice } from "@/lib/calculatePrice";
 import { toast } from "sonner";
 import { StockProvider } from "@/context/StockContext";
+import { getDisplaySku, getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
 
 type Props = {
   rug: RugProduct;
@@ -21,12 +22,13 @@ type Props = {
 
 const RugDetails: FC<Props> = ({ rug, locale }) => {
   const searchParams = useSearchParams();
-  const stockCode = rug.product_code || "N/A";
+  const stockCode = getDisplaySku(rug) || "N/A";
   const description = rug.description?.[locale] || "";
   const name = rug.product_name?.[locale] || "Unnamed Product";
   const features = rug.features?.[locale];
   const {dictionary} = useDictionary();
   const { eurToRubRate } = useCurrency();
+  const priceOnRequest = isPriceOnRequestProduct(rug);
 
   const [open, setOpen] = useState(false);
 
@@ -75,7 +77,9 @@ const RugDetails: FC<Props> = ({ rug, locale }) => {
         {dictionary?.shared.sku || "SKU"}: {stockCode}
       </p>
       <p className="text-sm text-gray-700">{dictionary?.shared.produced}</p>
-      <p className="text-base text-gray-800 leading-relaxed font-semibold">{formatPrice(currentPriceEur, locale, eurToRubRate)}</p>
+      <p className="text-base text-gray-800 leading-relaxed font-semibold">
+        {priceOnRequest ? getPriceOnRequestLabel(locale) : formatPrice(currentPriceEur, locale, eurToRubRate)}
+      </p>
       <p className="text-base text-gray-800 leading-relaxed">{description}</p>
 
       <AdminStockButton productCode={rug.product_code} className="w-full sm:w-auto" />

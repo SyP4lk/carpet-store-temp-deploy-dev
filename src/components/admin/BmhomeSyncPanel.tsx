@@ -152,6 +152,11 @@ export default function BmhomeSyncPanel() {
   }
 
   const lastRun = status?.lastRun
+  const priceOnRequestCount = lastRun?.hiddenZeroPrice ?? 0
+  const hiddenNoPriceCount = lastRun?.hiddenNoPrice ?? 0
+  const pricedCount = lastRun
+    ? Math.max(0, (lastRun.productsParsed ?? 0) - (lastRun.deactivated ?? 0) - hiddenNoPriceCount - priceOnRequestCount)
+    : 0
   const resolvedSourceLabel = useMemo(() => {
     if (!status) return '—'
     if (status.resolvedSource === 'MERGE') return 'Дефолтные + BMHOME'
@@ -243,11 +248,12 @@ export default function BmhomeSyncPanel() {
             <p className="text-sm text-gray-500">Деактивировано: {lastRun?.deactivated ?? 0}</p>
           </div>
           <div className="border rounded-md p-4">
-            <p className="text-xs uppercase text-gray-400">Скрыто</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {lastRun ? lastRun.hiddenNoPrice + lastRun.hiddenZeroPrice : 0}
-            </p>
-            <p className="text-sm text-gray-500">Ошибки: {lastRun?.errorsCount ?? 0}</p>
+            <p className="text-xs uppercase text-gray-400">Visibility</p>
+            <p className="text-sm text-gray-700">Priced: {pricedCount}</p>
+            <p className="text-sm text-gray-700">Price on request: {priceOnRequestCount}</p>
+            <p className="text-sm text-gray-700">Hidden: {hiddenNoPriceCount}</p>
+            <p className="text-sm text-gray-500">Deactivated: {lastRun?.deactivated ?? 0}</p>
+            <p className="text-sm text-gray-500">Errors: {lastRun?.errorsCount ?? 0}</p>
           </div>
         </div>
       </div>

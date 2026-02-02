@@ -12,6 +12,7 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useLocale } from "@/hooks/useLocale";
 import { useCurrency } from "@/context/CurrencyContext";
 import Link from "next/link";
+import { getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
 
 const CartPage = () => {
   const [locale] = useLocale();
@@ -147,7 +148,9 @@ const CartPage = () => {
                     height={80}
                     src={ci.item.images[0]}
                     alt={String(ci.item.id)}
+                    loading="lazy"
                     className="w-20 h-20 object-cover rounded"
+                    unoptimized={typeof ci.item.images?.[0] === "string" && ci.item.images[0].includes("ticimax.cloud")}
                   />
                   <div className="flex-1">
                     <h3 className="font-medium text-gray-900">
@@ -168,7 +171,9 @@ const CartPage = () => {
                     </button>
                   </div>
                   <div className="text-green-600 font-bold">
-                    {convertPrice(ci.totalPrice).toLocaleString("ru-RU")} {locale === 'ru' ? '₽' : '€'}
+                    {isPriceOnRequestProduct(ci.item)
+                      ? getPriceOnRequestLabel(locale)
+                      : `${convertPrice(ci.totalPrice).toLocaleString("ru-RU")} ${locale === 'ru' ? '₽' : '€'}`}
                   </div>
                 </div>
               ))}

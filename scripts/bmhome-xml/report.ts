@@ -11,8 +11,8 @@ export type SyncTotals = {
   updated: number
   unchanged: number
   deactivated: number
-  hiddenNoPrice: number
-  hiddenZeroPrice: number
+  hiddenNoPriceCount: number
+  priceOnRequestCount: number
   errorsCount: number
 }
 
@@ -74,6 +74,13 @@ function formatMarkdown(report: SyncReport): string {
   lines.push(`Duration: ${Math.round(report.durationMs / 1000)}s`)
   lines.push('')
   lines.push('## Totals')
+  const pricedCount = Math.max(
+    0,
+    report.totals.productsParsed -
+      report.totals.deactivated -
+      report.totals.hiddenNoPriceCount -
+      report.totals.priceOnRequestCount
+  )
   lines.push(`- Products found: ${report.totals.productsFound}`)
   lines.push(`- Products parsed: ${report.totals.productsParsed}`)
   lines.push(`- Variants found: ${report.totals.variantsFound}`)
@@ -82,8 +89,9 @@ function formatMarkdown(report: SyncReport): string {
   lines.push(`- Updated: ${report.totals.updated}`)
   lines.push(`- Unchanged: ${report.totals.unchanged}`)
   lines.push(`- Deactivated: ${report.totals.deactivated}`)
-  lines.push(`- Hidden (no price): ${report.totals.hiddenNoPrice}`)
-  lines.push(`- Hidden (zero/negative): ${report.totals.hiddenZeroPrice}`)
+  lines.push(`- Priced: ${pricedCount}`)
+  lines.push(`- Price on request: ${report.totals.priceOnRequestCount}`)
+  lines.push(`- Hidden (no price): ${report.totals.hiddenNoPriceCount}`)
   lines.push(`- Errors: ${report.totals.errorsCount}`)
   lines.push('')
   if (report.noteRu) {

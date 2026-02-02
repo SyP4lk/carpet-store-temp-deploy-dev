@@ -11,7 +11,8 @@
     "db:migrate": "tsx prisma/migrate-data.ts",
     "postinstall": "prisma generate",
     "sync:bmhome": "tsx scripts/bmhome-xml-sync.ts",
-    "sync:bmhome:dry": "tsx scripts/bmhome-xml-sync.ts --dry-run"
+    "sync:bmhome:dry": "tsx scripts/bmhome-xml-sync.ts --dry-run",
+    "bmhome:translate-ru": "tsx scripts/bmhome-translate-ru.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "^0.6.1",

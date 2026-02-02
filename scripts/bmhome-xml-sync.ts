@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { Readable } from 'node:stream'
 import sax from 'sax'
 import { load } from 'cheerio'
@@ -211,6 +212,39 @@ function normalizeSizeLabel(size: string): string {
   return `${match[1]} x ${match[2]} cm`
 }
 
+function normalizeSpecialSize(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isSpecialSizeLabel(value?: string): boolean {
+  if (!value) return false
+  const normalized = normalizeSpecialSize(value)
+  return normalized === 'ozel olcu' || normalized.includes('ozel olcu')
+}
+
+function buildBmhomeTranslationHash(data: {
+  shortHtml?: string | null
+  descriptionHtml?: string | null
+  technicalDetails?: TechnicalDetail[]
+}): string {
+  const payload = JSON.stringify({
+    shortHtml: data.shortHtml ?? '',
+    descriptionHtml: data.descriptionHtml ?? '',
+    technicalDetails:
+      data.technicalDetails?.map((detail) => ({
+        key: detail.key ?? '',
+        value: detail.value ?? '',
+      })) ?? [],
+  })
+  return createHash('sha256').update(payload).digest('hex')
+}
+
 function normalizeFlag(value?: string): boolean {
   const text = (value ?? '').toLowerCase().trim()
   if (!text) return false
@@ -275,8 +309,8 @@ async function main() {
     updated: 0,
     unchanged: 0,
     deactivated: 0,
-    hiddenNoPrice: 0,
-    hiddenZeroPrice: 0,
+    hiddenNoPriceCount: 0,
+    priceOnRequestCount: 0,
     errorsCount: 0,
   }
   const priceChanged: PriceChange[] = []
@@ -317,8 +351,8 @@ async function main() {
         updated: totals.updated,
         unchanged: totals.unchanged,
         deactivated: totals.deactivated,
-        hiddenNoPrice: totals.hiddenNoPrice,
-        hiddenZeroPrice: totals.hiddenZeroPrice,
+        hiddenNoPrice: totals.hiddenNoPriceCount,
+        hiddenZeroPrice: totals.priceOnRequestCount,
         errorsCount: totals.errorsCount,
         priceChangedCount: priceChanged.length,
         reportDir: reporter.runDir,
@@ -460,7 +494,8 @@ async function main() {
         sizeArea,
         isActive,
         inStock: isActive && parseStockStatus(variant.stockStatus),
-        priceReason: priceCandidate.reason,
+        salePriceUsd: regular.value ?? null,
+        discountPriceUsd: discounted.value ?? null,
       }
     })
 
@@ -469,40 +504,56 @@ async function main() {
     const parsedVariants = variantData.filter((variant) => Boolean(variant.sizeLabel) && variant.isActive)
     totals.variantsParsed += parsedVariants.length
 
-    const validSizedVariants = parsedVariants.filter((variant) => variant.priceEur && variant.sizeArea > 0)
-    validSizedVariants.sort((a, b) => a.sizeArea - b.sizeArea)
+    const variantsWithPrice = parsedVariants.filter((variant) => Boolean(variant.priceEur))
+    const inStockPricedVariants = variantsWithPrice.filter((variant) => variant.inStock)
 
-    let baseVariant = validSizedVariants[0]
-    if (!baseVariant) {
-      const anyValid = parsedVariants.find((variant) => variant.priceEur)
-      if (anyValid) {
-        baseVariant = anyValid
-      }
-    }
+    const pickMinPrice = (variants: typeof parsedVariants) =>
+      variants.reduce<typeof parsedVariants[number] | null>((best, current) => {
+        if (!current.priceEur) return best
+        if (!best) return current
+        return current.priceEur < (best.priceEur ?? Number.POSITIVE_INFINITY) ? current : best
+      }, null)
 
-    const sizes = validSizedVariants.map((variant) => variant.sizeLabel as string)
+    const baseVariant =
+      inStockPricedVariants.length > 0 ? pickMinPrice(inStockPricedVariants) : pickMinPrice(variantsWithPrice)
+
+    const basePriceEur = baseVariant?.priceEur ?? null
+    const hasPositivePrice = variantsWithPrice.length > 0
+    const hasActiveVariants = parsedVariants.length > 0
+    const hasInStockVariant = parsedVariants.some((variant) => variant.inStock)
+    const hasSpecialSize = parsedVariants.some((variant) =>
+      isSpecialSizeLabel(variant.sizeLabel || variant.size)
+    )
+
+    const priceOnRequest =
+      productActive && !hasPositivePrice && hasActiveVariants && hasInStockVariant && hasSpecialSize
+
+    const sizeVariants = priceOnRequest
+      ? parsedVariants
+      : parsedVariants.filter((variant) => variant.priceEur && variant.sizeArea > 0)
+    const sizes = sizeVariants.map((variant) => variant.sizeLabel as string)
     const uniqueSizes = Array.from(new Set(sizes))
+    const defaultSize = baseVariant?.sizeLabel ?? uniqueSizes[0]
 
-    let basePriceEur = baseVariant?.priceEur ?? null
-    const defaultSize = baseVariant?.sizeLabel
-
-    const invalidReasons = parsedVariants
-      .map((variant) => variant.priceReason)
-      .filter((reason): reason is NonNullable<typeof reason> => Boolean(reason))
+    let newPrice = ''
+    let inStock = false
 
     if (!productActive) {
-      basePriceEur = null
       totals.deactivated += 1
-    } else if (!basePriceEur) {
-      basePriceEur = null
-      if (invalidReasons.includes('zero_or_negative')) {
-        totals.hiddenZeroPrice += 1
-      } else {
-        totals.hiddenNoPrice += 1
-      }
+      newPrice = ''
+      inStock = false
+    } else if (hasPositivePrice && basePriceEur) {
+      newPrice = basePriceEur.toFixed(2)
+      inStock = inStockPricedVariants.length > 0
+    } else if (priceOnRequest) {
+      newPrice = '0.00'
+      inStock = hasInStockVariant
+      totals.priceOnRequestCount += 1
+    } else {
+      newPrice = ''
+      inStock = false
+      totals.hiddenNoPriceCount += 1
     }
-
-    const inStock = productActive && parsedVariants.some((variant) => variant.inStock && variant.priceEur)
 
     const descriptionText = htmlToText(product.descriptionHtml || product.shortHtml || '')
     const shortText = htmlToText(product.shortHtml || '')
@@ -527,31 +578,6 @@ async function main() {
     const cleanedImages = product.images.map((image) => image.trim()).filter(Boolean)
     const uniqueImages = Array.from(new Set(cleanedImages))
 
-    const sourceMeta = {
-      bmhome: {
-        productId: productId,
-        productUrl: product.url,
-        brand: product.brand,
-        category: product.category,
-        categoryTree: product.categoryTree,
-        shortHtml: product.shortHtml,
-        descriptionHtml: product.descriptionHtml,
-        technicalDetails: product.technicalDetails,
-        variants: parsedVariants.map((variant) => ({
-          variationId: variant.variationId,
-          sku: variant.sku,
-          barcode: variant.barcode,
-          size: variant.sizeLabel || variant.size,
-          currency: variant.currency,
-          priceUsd: variant.priceUsd,
-          priceEur: variant.priceEur,
-          isActive: variant.isActive,
-          inStock: variant.inStock,
-        })),
-      },
-    }
-
-    const newPrice = basePriceEur ? basePriceEur.toFixed(2) : ''
     const existing = await prisma.product.findUnique({
       where: { productCode },
       select: {
@@ -564,8 +590,53 @@ async function main() {
         isNew: true,
         isRunners: true,
         source: true,
+        sourceMeta: true,
+        descriptions: { where: { locale: 'ru' }, select: { id: true } },
+        features: { where: { locale: 'ru' }, select: { id: true } },
       },
     })
+
+    const existingMeta = (existing?.sourceMeta ?? {}) as Record<string, any>
+    const existingBmhomeMeta = existingMeta?.bmhome ?? {}
+    const existingTranslationHash = existingBmhomeMeta?.translation?.enHash as string | undefined
+    const currentTranslationHash = buildBmhomeTranslationHash({
+      shortHtml: product.shortHtml,
+      descriptionHtml: product.descriptionHtml,
+      technicalDetails: product.technicalDetails,
+    })
+    const hasRuDescription = (existing?.descriptions?.length ?? 0) > 0
+    const hasRuFeature = (existing?.features?.length ?? 0) > 0
+    const shouldUpdateRu =
+      !existingTranslationHash ||
+      existingTranslationHash !== currentTranslationHash ||
+      !hasRuDescription ||
+      !hasRuFeature
+
+    const sourceMeta = {
+      ...existingMeta,
+      bmhome: {
+        ...existingBmhomeMeta,
+        productId: productId,
+        productUrl: product.url,
+        brand: product.brand,
+        category: product.category,
+        categoryTree: product.categoryTree,
+        shortHtml: product.shortHtml,
+        descriptionHtml: product.descriptionHtml,
+        technicalDetails: product.technicalDetails,
+        priceOnRequest,
+        variants: variantData.map((variant) => ({
+          variationId: variant.variationId,
+          sku: variant.sku,
+          barcode: variant.barcode,
+          sizeLabel: variant.sizeLabel || variant.size || '',
+          isActive: variant.isActive,
+          stockStatus: variant.stockStatus,
+          salePriceUsd: variant.salePriceUsd,
+          discountPriceUsd: variant.discountPriceUsd,
+        })),
+      },
+    }
 
     const finalImages = uniqueImages.length > 0 ? uniqueImages : existing?.images ?? []
     const finalSizes = uniqueSizes.length > 0 ? uniqueSizes : existing?.sizes ?? []
@@ -615,14 +686,14 @@ async function main() {
               ],
             },
             descriptions: {
-              deleteMany: {},
+              deleteMany: shouldUpdateRu ? {} : { locale: 'en' },
               create: [
                 { locale: 'en', description: descriptionText },
-                { locale: 'ru', description: descriptionText },
+                ...(shouldUpdateRu ? [{ locale: 'ru', description: descriptionText }] : []),
               ],
             },
             features: {
-              deleteMany: {},
+              deleteMany: shouldUpdateRu ? {} : { locale: 'en' },
               create: [
                 {
                   locale: 'en',
@@ -630,12 +701,16 @@ async function main() {
                   careAndWarranty: care,
                   technicalInfo: technical,
                 },
-                {
-                  locale: 'ru',
-                  head: featureHead,
-                  careAndWarranty: care,
-                  technicalInfo: technical,
-                },
+                ...(shouldUpdateRu
+                  ? [
+                      {
+                        locale: 'ru',
+                        head: featureHead,
+                        careAndWarranty: care,
+                        technicalInfo: technical,
+                      },
+                    ]
+                  : []),
               ],
             },
             colors: {
@@ -752,8 +827,8 @@ async function main() {
         updated: totals.updated,
         unchanged: totals.unchanged,
         deactivated: totals.deactivated,
-        hiddenNoPrice: totals.hiddenNoPrice,
-        hiddenZeroPrice: totals.hiddenZeroPrice,
+        hiddenNoPrice: totals.hiddenNoPriceCount,
+        hiddenZeroPrice: totals.priceOnRequestCount,
         errorsCount: totals.errorsCount,
         priceChangedCount: priceChanged.length,
       },
@@ -785,8 +860,8 @@ async function main() {
       if (totals.productsParsed % PROGRESS_EVERY === 0) {
         reporter.log(
           `Progress: parsed ${totals.productsParsed}, created ${totals.created}, updated ${totals.updated}, hidden ${
-            totals.hiddenNoPrice + totals.hiddenZeroPrice
-          }.`
+            totals.hiddenNoPriceCount
+          }, price-on-request ${totals.priceOnRequestCount}.`
         )
       }
       if (runId && totals.productsParsed - lastUpdateAt >= PROGRESS_EVERY) {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { RugProduct } from "../types/product";
+import { isPriceOnRequestProduct } from "@/lib/productUtils";
 
 interface CartItem {
   item: RugProduct;
@@ -25,6 +26,9 @@ export const useCartStore = create<CartStore>()(
       cart: [],
 
       addToCart: (product) => {
+        if (isPriceOnRequestProduct(product)) {
+          return;
+        }
         const cart = get().cart;
         const existing = cart.find((c) => c.item.id === product.id);
         // Очищаем запятые перед парсингом (1,390.00 -> 1390.00)

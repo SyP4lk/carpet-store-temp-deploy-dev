@@ -20,7 +20,7 @@ const FilteredRugs: FC<FilteredRugsProps> = async ({ params, searchParams }) => 
 
   const urlSearchParams = await searchParams;
   const pathParams = await params
-  const dict = await getDictionary()
+  const dict = await getDictionary(pathParams.locale)
   const data = await getAllProducts();
   const filteredRugs = filterProducts(data, urlSearchParams, pathParams.filter, pathParams.slug);
   
@@ -37,9 +37,24 @@ const FilteredRugs: FC<FilteredRugsProps> = async ({ params, searchParams }) => 
 
   const filterData=generateFilterData(data, pathParams.locale, dict)
 
+  const selectedFromData =
+    pathParams.filter === 'collection'
+      ? filteredRugs[0]?.collection?.[pathParams.locale]
+      : pathParams.filter === 'style'
+        ? filteredRugs[0]?.style?.[pathParams.locale]
+        : filteredRugs[0]?.color?.[pathParams.locale]
+  const selectedValue = selectedFromData || decodeURIComponent(pathParams.slug)
+  const filterLabel =
+    pathParams.filter === 'collection'
+      ? dict.shared.collections || 'Collection'
+      : pathParams.filter === 'style'
+        ? dict.shared.styles || 'Style'
+        : dict.shared.colors || 'Color'
+  const bannerTitle = `${filterLabel} - ${selectedValue}`
+
   return (
     <div>
-      <Banner filter={decodeURIComponent(pathParams.filter)} image={"/static/image1.png"} />
+      <Banner filter={decodeURIComponent(pathParams.filter)} image={"/static/image1.png"} title={bannerTitle} />
             <Suspense fallback={null}>
               <ProductControl />
             </Suspense>

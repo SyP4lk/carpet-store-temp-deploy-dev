@@ -43,4 +43,10 @@ export interface RugProduct {
   isNew:boolean
   isRunners:boolean
   inStock:boolean
+  sourceMeta?: {
+    bmhome?: {
+      priceOnRequest?: boolean;
+      productUrl?: string;
+    };
+  };
 }

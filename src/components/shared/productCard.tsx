@@ -12,6 +12,7 @@ import AdminStockButton from '@/components/admin/AdminStockButton';
 import { formatPrice } from '@/lib/currency';
 import { useCurrency } from '@/context/CurrencyContext';
 import { calculateRugPrice } from '@/lib/calculatePrice';
+import { getPriceOnRequestLabel, getRequestPriceCta, isPriceOnRequestProduct } from '@/lib/productUtils';
 
 type Props = {
   product: RugProduct;
@@ -26,6 +27,7 @@ const ProductCard: FC<Props> = ({ product }) => {
   const [locale] = useLocale();
   const {addToCart} = useCartStore();
   const { eurToRubRate } = useCurrency();
+  const priceOnRequest = isPriceOnRequestProduct(product);
 
   // Рассчитываем цену для размера по умолчанию
   const displayPrice = useMemo(() => {
@@ -84,6 +86,10 @@ const ProductCard: FC<Props> = ({ product }) => {
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (priceOnRequest) {
+      navigateToDetails();
+      return;
+    }
     // Добавляем товар с правильной ценой для defaultSize
     const productToAdd = {
       ...product,
@@ -158,7 +164,13 @@ const ProductCard: FC<Props> = ({ product }) => {
             onClick={handleAddToCart}
             className="cursor-pointer hover:shadow-lg transition bg-white text-gray-900 px-4 py-2 rounded-lg shadow-md"
           >
-            {locale === 'en' ? 'Add to Cart' : locale === 'ru' ? 'В корзину' : 'Sepete Ekle'}
+            {priceOnRequest
+  ? getRequestPriceCta(locale)
+  : locale === 'en'
+    ? 'Add to Cart'
+    : locale === 'ru'
+      ? 'В корзину'
+      : 'Sepete Ekle'}
           </button>
           <AdminStockButton productCode={product.product_code} />
         </div>
@@ -170,7 +182,7 @@ const ProductCard: FC<Props> = ({ product }) => {
             {product.product_name[locale]}
           </h3>
           <p className="text-center text-sm text-gray-700 mt-1">
-            {formatPrice(displayPrice, locale, eurToRubRate)}
+            {priceOnRequest ? getPriceOnRequestLabel(locale) : formatPrice(displayPrice, locale, eurToRubRate)}
           </p>
         </div>
         
@@ -187,3 +199,4 @@ const ProductCard: FC<Props> = ({ product }) => {
 };
 
 export default ProductCard;
+

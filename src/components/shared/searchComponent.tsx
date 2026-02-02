@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { formatPrice } from "@/lib/currency";
 import { useCurrency } from "@/context/CurrencyContext";
 import { calculateRugPrice } from "@/lib/calculatePrice";
+import { getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
 
 interface SearchComponentProps {
   locale: Locale;
@@ -270,7 +271,9 @@ const SearchComponent: React.FC<SearchComponentProps> = ({ locale }) => {
 
                             <div className="mt-auto">
                               <span className="text-xs font-semibold text-blue-600">
-                                {formatPrice(getDisplayPrice(product), locale, eurToRubRate)}
+                                {isPriceOnRequestProduct(product)
+                                  ? getPriceOnRequestLabel(locale)
+                                  : formatPrice(getDisplayPrice(product), locale, eurToRubRate)}
                               </span>
                             </div>
                           </div>
