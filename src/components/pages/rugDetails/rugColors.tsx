@@ -7,6 +7,7 @@ import Image from "next/image"
 import { useRouter } from "next/navigation"
 import nProgress from "nprogress"
 import { FC } from "react"
+import { shouldUnoptimizeImage, rewriteTicimaxImageUrl } from "@/lib/ticimaxImages";
 
 type Props = {
     rugs: RugProduct[]
@@ -26,14 +27,14 @@ const RugColors: FC<Props> = ({ rugs, locale}) => {
                         key={i}
                         className="p-1 border cursor-pointer">
                         <Image
-                            src={rug.images[0]}
+                            src={rewriteTicimaxImageUrl(rug.images[0])}
                             alt={rug.product_name[locale]}
                             width={270}
                             height={380}
                             priority={i === 0}
                             loading={i === 0 ? "eager" : "lazy"}
                             className="w-full object-cover"
-                            unoptimized={typeof rug.images?.[0] === "string" && rug.images[0].includes("ticimax.cloud")}
+                            unoptimized={shouldUnoptimizeImage(rug.images?.[0])}
                             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                             onClick={() => {
                                 nProgress.start()

@@ -1,6 +1,7 @@
 import { prisma } from './prisma'
 import { resolveCatalogSource } from './bmhomeSync'
 import { RugProduct } from '@/types/product'
+import { rewriteTicimaxImageUrl } from "./ticimaxImages";
 
 export async function getAllProducts(): Promise<RugProduct[]> {
   const { where: sourceWhere } = await resolveCatalogSource()
@@ -168,7 +169,7 @@ function transformProduct(product: any): RugProduct {
     price: product.price,
     sizes: product.sizes,
     defaultSize: product.defaultSize || undefined,
-    images: product.images,
+    images: Array.isArray(product.images) ? product.images.map(rewriteTicimaxImageUrl) : [],
     isNew: product.isNew,
     isRunners: product.isRunners,
     inStock: product.inStock,

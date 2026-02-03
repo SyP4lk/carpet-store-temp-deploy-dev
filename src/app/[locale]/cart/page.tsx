@@ -13,6 +13,7 @@ import { useLocale } from "@/hooks/useLocale";
 import { useCurrency } from "@/context/CurrencyContext";
 import Link from "next/link";
 import { getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { shouldUnoptimizeImage } from "@/lib/ticimaxImages";
 
 const CartPage = () => {
   const [locale] = useLocale();
@@ -110,7 +111,13 @@ const CartPage = () => {
         <div className="flex items-center justify-between mb-8">
           <div className="w-full flex justify-between items-center space-x-4">
             <Link href={`/${locale}/`}>
-              <Image src="/logo-dark.png" width={100} height={50} alt="logo" />
+              <Image  
+              src="/logo-dark.png" 
+              width={100} 
+              height={50} 
+              alt="logo" 
+             
+               />
             </Link>
             <div className="size-12 bg-gray-300 rounded-full cursor-pointer"></div>
           </div>
@@ -150,7 +157,7 @@ const CartPage = () => {
                     alt={String(ci.item.id)}
                     loading="lazy"
                     className="w-20 h-20 object-cover rounded"
-                    unoptimized={typeof ci.item.images?.[0] === "string" && ci.item.images[0].includes("ticimax.cloud")}
+                    unoptimized={shouldUnoptimizeImage(ci.item.images?.[0])}
                   />
                   <div className="flex-1">
                     <h3 className="font-medium text-gray-900">

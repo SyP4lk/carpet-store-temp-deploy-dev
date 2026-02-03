@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Loader2, AlertTriangle, ImageIcon } from "lucide-react";
 import Image, { ImageProps } from "next/image";
 import { FC, useEffect, useRef, useState, useCallback } from "react";
+import { shouldUnoptimizeImage, rewriteTicimaxImageUrl } from "@/lib/ticimaxImages";
 
 type LazyImageProps = ImageProps & {
   className?: string;
@@ -129,7 +130,8 @@ const LazyImage: FC<LazyImageProps> = ({
   const wrapperStyles = props.fill 
     ? { position: 'absolute' as const, inset: 0 }
     : undefined;
-
+  const normalizedSrc =
+    typeof props.src === "string" ? rewriteTicimaxImageUrl(props.src) : props.src;
   return (
     <div
       ref={wrapRef}
@@ -187,13 +189,14 @@ const LazyImage: FC<LazyImageProps> = ({
       {(shouldLoad || !showPlaceholder) && !error && props.src && (
         <Image
           {...props}
+          src={normalizedSrc}
           alt={alt || "Image"}
           sizes={sizes || "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"}
           onLoadStart={handleLoadStart}
           onLoad={handleLoadComplete}
           onError={handleError}
           draggable={false}
-          unoptimized={typeof props.src === 'string' && props.src.includes('ticimax.cloud')}
+          unoptimized={shouldUnoptimizeImage(normalizedSrc)}
           className={clsx(
             "transition-opacity duration-500 ease-out",
             loading ? "opacity-0" : "opacity-100",
