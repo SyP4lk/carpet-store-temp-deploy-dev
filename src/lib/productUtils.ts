@@ -2,7 +2,7 @@ import { RugProduct } from "@/types/product";
 
 function parseSizeLabel(size: string): { w: number; h: number } | null {
   const cleaned = (size || "").replace(/cm/gi, "").trim();
-  const m = cleaned.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  const m = cleaned.match(/(\d+(?:\.\d+)?)\s*[x\u00d7\u0445]\s*(\d+(?:\.\d+)?)/i);
   if (!m) return null;
   return { w: Number(m[1]), h: Number(m[2]) };
 }

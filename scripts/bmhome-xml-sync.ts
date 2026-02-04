@@ -60,7 +60,7 @@ function parseArgs(args: string[]): Config {
   let dryRun = false
   let parseOnly = false
   let limit: number | undefined
-  let file: string | undefined
+  let file: string | undefined = process.env.BMHOME_FEED_FILE?.trim() || undefined
   let feedUrl: string | undefined
   let reportDir = process.env.SYNC_REPORT_DIR || DEFAULT_REPORT_DIR
   let debug = false
@@ -198,16 +198,18 @@ function extractFeatureLists(html: string) {
   return { care, technical }
 }
 
+const SIZE_REGEX = /(\d+(?:\.\d+)?)\s*[x\u00d7\u0445]\s*(\d+(?:\.\d+)?)/i
+
 function parseSizeArea(size: string): number {
   const cleaned = size.replace(/cm/gi, '').trim()
-  const match = cleaned.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i)
+  const match = cleaned.match(SIZE_REGEX)
   if (!match) return 0
   return Number(match[1]) * Number(match[2])
 }
 
 function normalizeSizeLabel(size: string): string {
   const cleaned = size.replace(/\s+/g, ' ').trim()
-  const match = cleaned.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i)
+  const match = cleaned.match(SIZE_REGEX)
   if (!match) return cleaned
   return `${match[1]} x ${match[2]} cm`
 }
@@ -226,6 +228,26 @@ function isSpecialSizeLabel(value?: string): boolean {
   if (!value) return false
   const normalized = normalizeSpecialSize(value)
   return normalized === 'ozel olcu' || normalized.includes('ozel olcu')
+}
+
+function isSizeOptionName(value?: string): boolean {
+  if (!value) return false
+  const normalized = normalizeSpecialSize(value)
+  return (
+    normalized === 'size' ||
+    normalized.includes('size') ||
+    normalized.includes('ebat') ||
+    normalized.includes('olcu') ||
+    normalized.includes('boyut')
+  )
+}
+
+function isSizeValue(value?: string): boolean {
+  if (!value) return false
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  if (isSpecialSizeLabel(trimmed)) return true
+  return SIZE_REGEX.test(trimmed)
 }
 
 function buildBmhomeTranslationHash(data: {
@@ -269,11 +291,23 @@ function normalizeFlag(value?: string): boolean {
   return text.includes('evet')
 }
 
+function getAttributeValue(attrs: Record<string, unknown> | undefined, key: string): string | undefined {
+  if (!attrs) return undefined
+  const match = Object.keys(attrs).find((attr) => attr.toLowerCase() === key.toLowerCase())
+  if (!match) return undefined
+  const value = attrs[match]
+  if (value === undefined || value === null) return undefined
+  return String(value).trim()
+}
+
 function parseStockStatus(value?: string): boolean {
   const text = (value ?? '').toLowerCase().trim()
   if (!text) return false
+  const numeric = Number.parseFloat(text.replace(',', '.'))
+  if (Number.isFinite(numeric)) return numeric > 0
   if (text.includes('out')) return false
   if (text.includes('yok') || text.includes('tukendi')) return false
+  if (text === 'var' || text.includes('var')) return true
   if (text.includes('stok')) return true
   if (text.includes('in stock')) return true
   if (text.includes('available')) return true
@@ -499,8 +533,12 @@ async function main() {
     const variantData = product.variants.map((variant) => {
       const discounted = normalizePriceWithMeta(variant.discountedPrice)
       const regular = normalizePriceWithMeta(variant.price)
-      const priceCandidate = discounted.value && discounted.value > 0 ? discounted : regular
-      const priceUsd = priceCandidate.value
+      const salePriceUsd = regular.value && regular.value > 0 ? regular.value : null
+      const discountPriceUsd = discounted.value && discounted.value > 0 ? discounted.value : null
+      const priceCandidates = [discountPriceUsd, salePriceUsd].filter(
+        (value): value is number => typeof value === 'number' && value > 0
+      )
+      const priceUsd = priceCandidates.length > 0 ? Math.min(...priceCandidates) : null
       const priceEur = priceUsd && priceUsd > 0 ? Number((priceUsd * usdToEurRate).toFixed(2)) : null
       const sizeLabel = variant.size ? normalizeSizeLabel(variant.size) : undefined
       const sizeArea = sizeLabel ? parseSizeArea(sizeLabel) : 0
@@ -513,8 +551,8 @@ async function main() {
         sizeArea,
         isActive,
         inStock: isActive && parseStockStatus(variant.stockStatus),
-        salePriceUsd: regular.value ?? null,
-        discountPriceUsd: discounted.value ?? null,
+        salePriceUsd,
+        discountPriceUsd,
       }
     })
 
@@ -522,6 +560,7 @@ async function main() {
 
     const parsedVariants = variantData.filter((variant) => Boolean(variant.sizeLabel) && variant.isActive)
     totals.variantsParsed += parsedVariants.length
+    const variantsForMeta = parsedVariants.length > 0 ? parsedVariants : variantData
 
     const variantsWithPrice = parsedVariants.filter(
       (variant) => typeof variant.priceEur === 'number' && variant.priceEur > 0
@@ -676,7 +715,7 @@ async function main() {
         technicalDetails: product.technicalDetails,
         priceOnRequest,
         translation: nextTranslation,
-        variants: variantData.map((variant) => ({
+        variants: variantsForMeta.map((variant) => ({
           variationId: variant.variationId,
           sku: variant.sku,
           barcode: variant.barcode,
@@ -952,7 +991,27 @@ async function main() {
     const textStack: string[] = []
     let currentProduct: ProductRaw | null = null
     let currentVariant: VariantRaw | null = null
+    let currentVariantOption: { name?: string; value?: string } | null = null
     let currentDetail: TechnicalDetail | null = null
+    const variantOptionTags = new Set(['Ozellik', 'SecenekOzellik', 'SecenekOzelligi', 'SecenekOzellikleri'])
+    const variantOptionNameTags = new Set(['Tanim', 'OzellikTanim', 'SecenekTanim', 'SecenekAdi'])
+    const variantOptionValueTags = new Set(['Deger', 'OzellikDeger', 'SecenekDeger', 'DegerTanim'])
+    const variantSizeTags = new Set(['SecenekAdi', 'SecenekDeger', 'Ebat', 'Boyut', 'Size', 'Beden'])
+    const assignVariantSize = (candidate?: string) => {
+      if (!currentVariant) return
+      if (!candidate || currentVariant.size) return
+      if (isSizeValue(candidate)) {
+        currentVariant.size = candidate.trim()
+      }
+    }
+    const applyVariantOption = () => {
+      if (!currentVariant || !currentVariantOption) return
+      const optionValue = currentVariantOption.value?.trim()
+      if (!optionValue || currentVariant.size) return
+      if (isSizeOptionName(currentVariantOption.name) || isSizeValue(optionValue)) {
+        currentVariant.size = optionValue
+      }
+    }
 
     parser.onerror = (error) => {
       parserError = error
@@ -972,12 +1031,34 @@ async function main() {
         }
       } else if (node.name === 'Secenek') {
         currentVariant = {}
+        currentVariantOption = null
       } else if (node.name === 'TeknikDetay') {
         currentDetail = {}
-      } else if (node.name === 'Ozellik' && currentVariant && node.attributes?.Tanim === 'SIZE') {
-        const sizeAttr = node.attributes?.Deger
-        if (sizeAttr) {
-          currentVariant.size = String(sizeAttr).trim()
+      }
+
+      if (currentVariant && !currentDetail) {
+        if (variantOptionTags.has(node.name)) {
+          currentVariantOption = {}
+        } else if ((node.name === 'SecenekAdi' || node.name === 'SecenekDeger') && !currentVariantOption) {
+          currentVariantOption = {}
+        }
+
+        if (currentVariantOption) {
+          const optionName = getAttributeValue(node.attributes as Record<string, unknown>, 'Tanim')
+          const optionValue = getAttributeValue(node.attributes as Record<string, unknown>, 'Deger')
+          if (optionName) {
+            currentVariantOption.name = optionName
+          }
+          if (optionValue) {
+            currentVariantOption.value = optionValue
+          }
+          if (
+            currentVariantOption.value &&
+            !currentVariant.size &&
+            (isSizeOptionName(currentVariantOption.name) || isSizeValue(currentVariantOption.value))
+          ) {
+            currentVariant.size = currentVariantOption.value.trim()
+          }
         }
       }
     }
@@ -1007,7 +1088,40 @@ async function main() {
         if (name === 'SatisFiyati') currentVariant.price = value
         if (name === 'IndirimliFiyat') currentVariant.discountedPrice = value
         if (name === 'ParaBirimiKodu') currentVariant.currency = value
-        if (name === 'Ozellik' && value && !currentVariant.size) currentVariant.size = value
+
+        if (!currentDetail) {
+          if (variantOptionNameTags.has(name)) {
+            if (!currentVariantOption) currentVariantOption = {}
+            currentVariantOption.name = value
+            if (name === 'SecenekAdi') {
+              assignVariantSize(value)
+            }
+            applyVariantOption()
+          }
+          if (variantOptionValueTags.has(name)) {
+            if (!currentVariantOption) currentVariantOption = {}
+            currentVariantOption.value = value
+            applyVariantOption()
+            if (name === 'SecenekDeger') {
+              currentVariantOption = null
+            }
+          }
+
+          if (variantSizeTags.has(name)) {
+            assignVariantSize(value)
+          }
+
+          if (name === 'Ozellik') {
+            assignVariantSize(value)
+            applyVariantOption()
+            currentVariantOption = null
+          }
+
+          if (variantOptionTags.has(name)) {
+            applyVariantOption()
+            currentVariantOption = null
+          }
+        }
       }
 
       if (currentDetail) {
@@ -1036,6 +1150,7 @@ async function main() {
       if (name === 'Secenek' && currentProduct && currentVariant) {
         currentProduct.variants.push(currentVariant)
         currentVariant = null
+        currentVariantOption = null
       }
 
       if (name === 'Urun' && currentProduct) {
