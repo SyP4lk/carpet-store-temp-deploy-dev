@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef } from "react";
 import { X, Search, Loader2 } from "lucide-react";
@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import { formatPrice } from "@/lib/currency";
 import { useCurrency } from "@/context/CurrencyContext";
 import { calculateRugPrice } from "@/lib/calculatePrice";
-import { getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { getBmhomeVariantPriceEur, getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
 
 interface SearchComponentProps {
   locale: Locale;
@@ -130,18 +130,23 @@ const SearchComponent: React.FC<SearchComponentProps> = ({ locale }) => {
     router.push(`/${locale}/rugs/${product.id}`);
   };
 
-  // Функция для расчета цены с учетом defaultSize (как в ProductCard)
+  // Р¤СѓРЅРєС†РёСЏ РґР»СЏ СЂР°СЃС‡РµС‚Р° С†РµРЅС‹ СЃ СѓС‡РµС‚РѕРј defaultSize (РєР°Рє РІ ProductCard)
   const getDisplayPrice = (product: RugProduct): number => {
     const basePrice = typeof product.price === 'string'
       ? parseFloat(product.price.replace(/,/g, ''))
       : (product.price || 0);
 
-    // Если есть размеры и defaultSize, рассчитываем цену для defaultSize
+    const isBmhome = !!product.sourceMeta?.bmhome;
+    if (isBmhome) {
+      const preferredSize = product.defaultSize || product.sizes?.[0] || '';
+      const variantPrice = getBmhomeVariantPriceEur(product, preferredSize);
+      return variantPrice ?? basePrice;
+    }
+
     if (product.sizes && product.sizes.length > 0 && product.defaultSize) {
       return calculateRugPrice(basePrice, product.sizes, product.defaultSize);
     }
 
-    // Иначе возвращаем базовую цену
     return basePrice;
   };
 
@@ -336,3 +341,5 @@ const SearchComponent: React.FC<SearchComponentProps> = ({ locale }) => {
 };
 
 export default SearchComponent;
+
+

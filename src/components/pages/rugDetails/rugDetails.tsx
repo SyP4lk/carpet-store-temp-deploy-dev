@@ -12,7 +12,7 @@ import { useSearchParams } from "next/navigation";
 import { calculateRugPrice } from "@/lib/calculatePrice";
 import { toast } from "sonner";
 import { StockProvider } from "@/context/StockContext";
-import { getDisplaySku, getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { getBmhomeVariantPriceEur, getDisplaySku, getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
 
 type Props = {
   rug: RugProduct;
@@ -57,17 +57,24 @@ const stockCode = useMemo(() => getDisplaySku(rug, selectedSize) || "N/A", [rug,
   const basePrice = typeof rug.price === 'string' ? parseFloat(rug.price.replace(/,/g, '')) : (rug.price || 0);
 
   const currentPriceEur = useMemo(() => {
-    if (!basePrice || !rug.sizes?.length) {
-      return basePrice;
+    if (priceOnRequest) return 0;
+
+    const isBmhome = !!rug.sourceMeta?.bmhome;
+    if (isBmhome) {
+      const vPrice = getBmhomeVariantPriceEur(rug, selectedSize);
+      return vPrice ?? basePrice;
     }
+
+    if (!basePrice || !rug.sizes?.length) return basePrice;
 
     try {
       return calculateRugPrice(basePrice, rug.sizes, selectedSize);
     } catch (error) {
-      console.error("Price calculation error:", error);
+      console.error('Error calculating price:', error);
       return basePrice;
     }
-  }, [basePrice, rug.sizes, selectedSize]);
+  }, [basePrice, rug, selectedSize, priceOnRequest]);
+
 
 
   return (

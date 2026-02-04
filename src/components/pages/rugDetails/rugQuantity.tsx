@@ -10,7 +10,8 @@ import { calculateRugPrice } from "@/lib/calculatePrice";
 import { useDictionary } from "@/hooks/useDictionary";
 import { useCurrency } from "@/context/CurrencyContext";
 import { Locale } from "@/localization/config";
-import { getDisplaySku, getPriceOnRequestLabel, getRequestPriceCta, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { getBmhomeVariantPriceEur, getDisplaySku, getPriceOnRequestLabel, getRequestPriceCta, isPriceOnRequestProduct } from "@/lib/productUtils";
+
 
 type Props = {
   rug: RugProduct;
@@ -56,7 +57,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
     if (sizeParam) {
       setSelectedSize(sizeParam);
     } else if (widthParam && heightParam) {
-      setSelectedSize(`${widthParam}x${heightParam} cm`);
+      setSelectedSize(`${widthParam} x ${heightParam} cm`);
     } else {
       // Use initial size (which respects defaultSize)
       setSelectedSize(getInitialSize());
@@ -68,18 +69,33 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
   const basePrice = typeof rug.price === 'string' ? parseFloat(rug.price.replace(/,/g, '')) : (rug.price ?? 0);
 
   const priceEur = useMemo(() => {
-    const sizes = rug.sizes ?? [];
-    return calculateRugPrice(basePrice, sizes, selectedSize);
-  }, [rug.sizes, selectedSize, basePrice]);
+    if (priceOnRequest) return 0;
 
-  // Конвертируем в рубли для ru локали с наценкой 2%
+    const isBmhome = !!rug.sourceMeta?.bmhome;
+    if (isBmhome) {
+      const vPrice = getBmhomeVariantPriceEur(rug, selectedSize);
+      return vPrice ?? basePrice;
+    }
+
+    if (!basePrice || !rug.sizes?.length) return basePrice;
+
+    try {
+      return calculateRugPrice(basePrice, rug.sizes, selectedSize);
+    } catch (error) {
+      console.error("Error calculating price:", error);
+      return basePrice;
+    }
+  }, [basePrice, rug, selectedSize, priceOnRequest]);
+
   const displayPrice = useMemo(() => {
+    if (priceOnRequest) return 0;
+
     if (locale === 'ru') {
       return Math.round(priceEur * eurToRubRate * 1.02);
     }
-    // EN: евро + 2% наценка
     return Math.round(priceEur * 1.02);
-  }, [priceEur, locale, eurToRubRate]);
+  }, [priceEur, locale, eurToRubRate, priceOnRequest]);
+
 
   const orderPriceEur = priceOnRequest ? 0 : priceEur;
   const orderDisplayPrice = priceOnRequest ? 0 : displayPrice;

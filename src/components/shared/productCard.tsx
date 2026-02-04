@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Heart } from "lucide-react";
 import { FC, useState, useRef, useEffect, useMemo } from "react";
@@ -12,7 +12,8 @@ import AdminStockButton from '@/components/admin/AdminStockButton';
 import { formatPrice } from '@/lib/currency';
 import { useCurrency } from '@/context/CurrencyContext';
 import { calculateRugPrice } from '@/lib/calculatePrice';
-import { getPriceOnRequestLabel, getRequestPriceCta, isPriceOnRequestProduct } from '@/lib/productUtils';
+import { getBmhomeVariantPriceEur, getPriceOnRequestLabel, getRequestPriceCta, isPriceOnRequestProduct } from '@/lib/productUtils';
+
 
 type Props = {
   product: RugProduct;
@@ -28,21 +29,26 @@ const ProductCard: FC<Props> = ({ product }) => {
   const {addToCart} = useCartStore();
   const { eurToRubRate } = useCurrency();
   const priceOnRequest = isPriceOnRequestProduct(product);
+  const { price, sizes, defaultSize, sourceMeta } = product;
 
-  // Рассчитываем цену для размера по умолчанию
+  // Р Р°СЃСЃС‡РёС‚С‹РІР°РµРј С†РµРЅСѓ РґР»СЏ СЂР°Р·РјРµСЂР° РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ
   const displayPrice = useMemo(() => {
-    const basePrice = typeof product.price === 'string'
-      ? parseFloat(product.price.replace(/,/g, ''))
-      : (product.price || 0);
+    if (priceOnRequest) return 0;
 
-    // Если есть размеры и defaultSize, рассчитываем цену для defaultSize
-    if (product.sizes && product.sizes.length > 0 && product.defaultSize) {
-      return calculateRugPrice(basePrice, product.sizes, product.defaultSize);
+    const basePrice = typeof price === 'string' ? parseFloat(price.replace(/,/g, '')) : (price || 0);
+    const isBmhome = !!sourceMeta?.bmhome;
+    if (isBmhome) {
+      const preferredSize = defaultSize || sizes?.[0] || '';
+      const variantPrice = getBmhomeVariantPriceEur(product, preferredSize);
+      return variantPrice ?? basePrice;
     }
 
-    // Иначе возвращаем базовую цену
+    if (sizes && sizes.length > 0 && defaultSize) {
+      return calculateRugPrice(basePrice, sizes, defaultSize);
+    }
+
     return basePrice;
-  }, [product.price, product.sizes, product.defaultSize]);
+  }, [price, sizes, defaultSize, sourceMeta, product, priceOnRequest]);
 
 
   useEffect(() => {
@@ -90,7 +96,7 @@ const ProductCard: FC<Props> = ({ product }) => {
       navigateToDetails();
       return;
     }
-    // Добавляем товар с правильной ценой для defaultSize
+    // Р”РѕР±Р°РІР»СЏРµРј С‚РѕРІР°СЂ СЃ РїСЂР°РІРёР»СЊРЅРѕР№ С†РµРЅРѕР№ РґР»СЏ defaultSize
     const productToAdd = {
       ...product,
       price: displayPrice.toString(),
@@ -169,7 +175,7 @@ const ProductCard: FC<Props> = ({ product }) => {
   : locale === 'en'
     ? 'Add to Cart'
     : locale === 'ru'
-      ? 'В корзину'
+      ? 'Р’ РєРѕСЂР·РёРЅСѓ'
       : 'Sepete Ekle'}
           </button>
           <AdminStockButton productCode={product.product_code} />
@@ -199,4 +205,5 @@ const ProductCard: FC<Props> = ({ product }) => {
 };
 
 export default ProductCard;
+
 

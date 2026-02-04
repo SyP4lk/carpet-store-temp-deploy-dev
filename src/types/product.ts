@@ -49,13 +49,21 @@ export interface RugProduct {
     productUrl?: string;
     variants?: Array<{
       variationId?: string;
-      sku?: string;          // StokKodu
+      sku?: string;
       barcode?: string;
       sizeLabel?: string;
       isActive?: boolean;
       stockStatus?: string;
-      salePriceUsd?: string;
-      discountPriceUsd?: string;
+
+      // добавили из sync:
+      priceUsd?: number | null;
+      priceEur?: number | null;
+      inStock?: boolean;
+      isSpecialSize?: boolean;
+
+      salePriceUsd?: number | null;
+      discountPriceUsd?: number | null;
+      currency?: string;
     }>;
   };
 };

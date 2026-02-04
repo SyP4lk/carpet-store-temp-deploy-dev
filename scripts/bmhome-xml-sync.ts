@@ -450,10 +450,18 @@ async function main() {
 
   const settings = await prisma.bmhomeSyncSettings.findUnique({ where: { id: 1 } })
   const feedUrl = config.feedUrl || settings?.feedUrl || process.env.BMHOME_FEED_URL || DEFAULT_FEED_URL
-  const usdToEurRate = getUsdToEurRate(settings?.usdToEurRate ?? Number(process.env.BMHOME_USD_TO_EUR_RATE))
+  let usdToEurRate = getUsdToEurRate(settings?.usdToEurRate ?? Number(process.env.BMHOME_USD_TO_EUR_RATE))
+
+  if (usdToEurRate < 0.2 || usdToEurRate > 2) {
+    reporter.log(
+      `WARNING: USD -> EUR rate looks wrong (${usdToEurRate}). Fallback to 1. Set a realistic rate in admin settings.`
+    )
+    usdToEurRate = 1
+  }
 
   reporter.log(`Feed URL: ${feedUrl}`)
   reporter.log(`USD -> EUR rate: ${usdToEurRate}`)
+
 
   const handleError = (message: string, data: Partial<ErrorEntry>) => {
     const entry: ErrorEntry = {
@@ -491,14 +499,9 @@ async function main() {
     const variantData = product.variants.map((variant) => {
       const discounted = normalizePriceWithMeta(variant.discountedPrice)
       const regular = normalizePriceWithMeta(variant.price)
-      const priceCandidate =
-        discounted.value &&
-        discounted.value > 0 &&
-        (!regular.value || discounted.value < regular.value)
-          ? discounted
-          : regular
+      const priceCandidate = discounted.value && discounted.value > 0 ? discounted : regular
       const priceUsd = priceCandidate.value
-      const priceEur = priceUsd ? Number((priceUsd * usdToEurRate).toFixed(2)) : null
+      const priceEur = priceUsd && priceUsd > 0 ? Number((priceUsd * usdToEurRate).toFixed(2)) : null
       const sizeLabel = variant.size ? normalizeSizeLabel(variant.size) : undefined
       const sizeArea = sizeLabel ? parseSizeArea(sizeLabel) : 0
       const isActive = normalizeFlag(variant.active)
@@ -520,18 +523,18 @@ async function main() {
     const parsedVariants = variantData.filter((variant) => Boolean(variant.sizeLabel) && variant.isActive)
     totals.variantsParsed += parsedVariants.length
 
-    const variantsWithPrice = parsedVariants.filter((variant) => Boolean(variant.priceEur))
-    const inStockPricedVariants = variantsWithPrice.filter((variant) => variant.inStock)
-
+    const variantsWithPrice = parsedVariants.filter(
+      (variant) => typeof variant.priceEur === 'number' && variant.priceEur > 0
+    )
     const pickMinPrice = (variants: typeof parsedVariants) =>
       variants.reduce<typeof parsedVariants[number] | null>((best, current) => {
-        if (!current.priceEur) return best
+        if (!current.priceEur || current.priceEur <= 0) return best
         if (!best) return current
         return current.priceEur < (best.priceEur ?? Number.POSITIVE_INFINITY) ? current : best
       }, null)
 
-    const baseVariant =
-      inStockPricedVariants.length > 0 ? pickMinPrice(inStockPricedVariants) : pickMinPrice(variantsWithPrice)
+
+    const baseVariant = pickMinPrice(variantsWithPrice)
 
     const basePriceEur = baseVariant?.priceEur ?? null
     const hasPositivePrice = variantsWithPrice.length > 0
@@ -544,12 +547,13 @@ async function main() {
     const priceOnRequest =
       productActive && !hasPositivePrice && hasActiveVariants && hasInStockVariant && hasSpecialSize
 
-    const sizeVariants = priceOnRequest
-      ? parsedVariants
-      : parsedVariants.filter((variant) => variant.priceEur && variant.sizeArea > 0)
+    const sizeVariants = parsedVariants
     const sizes = sizeVariants.map((variant) => variant.sizeLabel as string)
     const uniqueSizes = Array.from(new Set(sizes))
-    const defaultSize = baseVariant?.sizeLabel ?? uniqueSizes[0]
+
+    const specialVariant = parsedVariants.find((variant) => isSpecialSizeLabel(variant.sizeLabel || variant.size))
+    const defaultSize = baseVariant?.sizeLabel ?? specialVariant?.sizeLabel ?? uniqueSizes[0]
+
 
     let newPrice = ''
     let inStock = false
@@ -560,16 +564,17 @@ async function main() {
       inStock = false
     } else if (hasPositivePrice && basePriceEur) {
       newPrice = basePriceEur.toFixed(2)
-      inStock = inStockPricedVariants.length > 0
+      inStock = hasInStockVariant
     } else if (priceOnRequest) {
       newPrice = '0.00'
       inStock = hasInStockVariant
       totals.priceOnRequestCount += 1
     } else {
       newPrice = ''
-      inStock = false
+      inStock = hasInStockVariant
       totals.hiddenNoPriceCount += 1
     }
+
 
     const descriptionText = htmlToText(product.descriptionHtml || product.shortHtml || '')
     const shortText = htmlToText(product.shortHtml || '')
@@ -582,9 +587,10 @@ async function main() {
       detailMap.set(detail.key.toUpperCase(), detail.value)
     }
 
-    const colorName = detailMap.get('COLOR') || product.category || ''
-    const styleName = detailMap.get('STYLE') || ''
-    const collectionName = detailMap.get('COLLECTION') || product.categoryTree || ''
+    const colorName = (product.category || '').trim() || (detailMap.get('COLOR') || '').trim()
+    const styleName = (detailMap.get('STYLE') || '').trim()
+    const collectionName = (detailMap.get('COLLECTION') || '').trim()
+
 
     // XML -> model mapping:
     // UrunKartiID -> productCode (external ID), UrunAdi -> productNames,
@@ -677,9 +683,18 @@ async function main() {
           sizeLabel: variant.sizeLabel || variant.size || '',
           isActive: variant.isActive,
           stockStatus: variant.stockStatus,
+
+          // важно для фронта:
+          priceUsd: variant.priceUsd,
+          priceEur: variant.priceEur,
+          inStock: variant.inStock,
+          isSpecialSize: isSpecialSizeLabel(variant.sizeLabel || variant.size),
+
           salePriceUsd: variant.salePriceUsd,
           discountPriceUsd: variant.discountPriceUsd,
+          currency: variant.currency,
         })),
+
       },
     }
 
@@ -888,7 +903,7 @@ async function main() {
 
   let parserError: Error | null = null
   let stopRequested = false
-  let queue: ProductRaw[] = []
+  const queue: ProductRaw[] = []
   let draining = false
   let drainPromise: Promise<void> | null = null
 

@@ -1,78 +1,82 @@
 import { RugProduct } from "@/types/product";
 
-export function isPriceOnRequestProduct(product?: RugProduct | null): boolean {
-  if (!product) return false;
-  if (product.sourceMeta?.bmhome?.priceOnRequest) return true;
-  const raw = typeof product.price === "string" ? product.price.trim() : String(product.price ?? "");
-  if (!raw) return false;
-  const numeric = Number(raw.replace(/,/g, ""));
-  return Number.isFinite(numeric) && numeric <= 0;
+function parseSizeLabel(size: string): { w: number; h: number } | null {
+  const cleaned = (size || "").replace(/cm/gi, "").trim();
+  const m = cleaned.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  if (!m) return null;
+  return { w: Number(m[1]), h: Number(m[2]) };
 }
 
-function normalizeSize(input?: string | null): string {
-  return String(input ?? "")
-    .toLowerCase()
-    .replace(/×/g, "x")
-    .replace(/cm/g, "")
-    .replace(/\+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\s*x\s*/g, " x ")
-    .trim();
+function sameSize(a?: string, b?: string): boolean {
+  const aa = (a ?? "").trim().toLowerCase();
+  const bb = (b ?? "").trim().toLowerCase();
+  if (aa && bb && aa === bb) return true;
+
+  const pa = parseSizeLabel(aa);
+  const pb = parseSizeLabel(bb);
+  if (!pa || !pb) return false;
+  return pa.w === pb.w && pa.h === pb.h;
 }
 
-/**
- * BMHOME "Stock Code" / variant SKU.
- * Хранится в sourceMeta.bmhome.variants[].sku (из XML <StokKodu>).
- */
-export function getBmhomeStockCode(product?: RugProduct | null, preferredSize?: string | null): string | null {
-  const variants = product?.sourceMeta?.bmhome?.variants;
-  if (!product || !Array.isArray(variants) || variants.length === 0) return null;
+function resolvePreferredSize(rug: RugProduct, selectedSize?: string | null): string | null {
+  const preferred = (selectedSize ?? "").trim();
+  if (preferred) return preferred;
+  if (rug.defaultSize?.trim()) return rug.defaultSize.trim();
+  const firstSize = rug.sizes?.find((size) => size && size.trim().length > 0);
+  return firstSize?.trim() ?? null;
+}
 
-  const wanted = normalizeSize(preferredSize || product.defaultSize || product.sizes?.[0]);
+function getBmhomeVariant(rug: RugProduct, selectedSize?: string | null) {
+  const variants = rug.sourceMeta?.bmhome?.variants ?? [];
+  if (!variants.length) return null;
 
-  // 1) Пробуем найти вариант по выбранному размеру
-  if (wanted) {
-    const v = variants.find((x) => normalizeSize(x?.sizeLabel) === wanted);
-    const code = v?.sku || v?.barcode;
-    if (code) return String(code);
+  const preferredSize = resolvePreferredSize(rug, selectedSize);
+  if (preferredSize) {
+    const match = variants.find((variant) => sameSize(variant.sizeLabel ?? "", preferredSize));
+    if (match) return match;
   }
 
-  // 2) Фолбек - первый активный вариант
-  const v0 = variants.find((x) => x?.isActive !== false) || variants[0];
-  return v0?.sku ? String(v0.sku) : v0?.barcode ? String(v0.barcode) : null;
+  const activeVariant = variants.find((variant) => variant.isActive !== false);
+  return activeVariant ?? variants[0] ?? null;
 }
 
-/**
- * Legacy SKU from BMHOME product URL, like .../amp000181-4692 -> amp000181
- */
-export function getBmhomeSkuFromUrl(url?: string | null): string | null {
-  if (!url) return null;
-  const clean = url.split(/[?#]/)[0];
-  const parts = clean.split("/").filter(Boolean);
-  const last = parts[parts.length - 1];
-  if (!last) return null;
-  const sku = last.split("-")[0];
-  return sku || null;
+export function getBmhomeStockCode(rug: RugProduct, selectedSize?: string | null): string {
+  const variant = getBmhomeVariant(rug, selectedSize);
+  return variant?.sku ?? variant?.barcode ?? "";
 }
 
-/**
- * Что показываем в UI как "Артикул" / "SKU".
- * Для BMHOME приоритет - Stock Code (StokKodu), он совпадает с партнером.
- */
-export function getDisplaySku(product?: RugProduct | null, preferredSize?: string | null): string {
-  if (!product) return "";
-
-  const stockCode = getBmhomeStockCode(product, preferredSize);
-  if (stockCode) return stockCode;
-
-  const fromUrl = getBmhomeSkuFromUrl(product.sourceMeta?.bmhome?.productUrl);
-  return fromUrl || product.product_code || "";
+export function isPriceOnRequestProduct(rug?: RugProduct | null): boolean {
+  if (!rug) return false;
+  const raw = typeof rug.price === "string" ? rug.price.trim() : String(rug.price ?? "");
+  if (raw) {
+    const numeric = Number(raw.replace(/,/g, ""));
+    if (Number.isFinite(numeric) && numeric <= 0) return true;
+  }
+  return rug.sourceMeta?.bmhome?.priceOnRequest === true;
 }
 
 export function getPriceOnRequestLabel(locale?: string): string {
-  return locale === "ru" ? "Цена по запросу" : "Price on request";
+  return locale === "en" ? "Price on request" : "Цена по запросу";
 }
 
 export function getRequestPriceCta(locale?: string): string {
-  return locale === "ru" ? "Уточнить цену" : "Request price";
+  return locale === "en" ? "Request price" : "Запросить цену";
+}
+
+export function getDisplaySku(rug: RugProduct, selectedSize?: string | null): string {
+  const bm = getBmhomeStockCode(rug, selectedSize);
+  if (bm) return bm;
+  return rug.product_code;
+}
+
+export function getBmhomeVariantPriceEur(rug: RugProduct, selectedSize?: string | null): number | null {
+  const variant = getBmhomeVariant(rug, selectedSize);
+  const val = variant?.priceEur;
+  if (typeof val === "number" && Number.isFinite(val) && val > 0) return val;
+  return null;
+}
+
+export function hasBmhomeSpecialSize(rug: RugProduct): boolean {
+  const variants = rug.sourceMeta?.bmhome?.variants ?? [];
+  return variants.some((variant) => variant.isSpecialSize);
 }
