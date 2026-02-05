@@ -19,7 +19,13 @@ export async function GET(request: Request) {
         const name = item.product_name[locale]
         const description = item.description[locale]
         const productCode = item.product_code
-        const searchText = `${name} ${description} ${productCode}`.toLowerCase();
+        const variantSkus =
+          item.sourceMeta?.bmhome?.variants
+            ?.map(v => v?.sku)
+            .filter(Boolean)
+            .join(' ') ?? '';
+
+        const searchText = `${name} ${description} ${productCode} ${variantSkus}`.toLowerCase();
         return searchText.includes(query.toLowerCase());
       });
     }

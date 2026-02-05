@@ -686,9 +686,13 @@ async function main() {
     }
 
 
-    const descriptionText = htmlToText(product.descriptionHtml || product.shortHtml || '')
     const shortText = htmlToText(product.shortHtml || '')
-    const featureHead = shortText || descriptionText
+    const descriptionText = shortText || htmlToText(product.descriptionHtml || '')
+
+    // featureHead можно оставить как есть, но чтобы не дублировать списки из Aciklama,
+    // лучше оставить краткий текст
+    const featureHead = htmlToText(product.descriptionHtml || '') || descriptionText
+
     const { care, technical } = extractFeatureLists(product.descriptionHtml || '')
 
     const detailMap = new Map<string, string>()
