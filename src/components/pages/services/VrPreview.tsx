@@ -1191,5 +1191,6 @@ export default function VrPreview({ locale }: { locale: Locale }) {
           </div>
         </div>
       </div>
+    </div>
   );
 }
