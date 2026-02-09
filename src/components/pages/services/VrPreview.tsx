@@ -17,20 +17,26 @@ type LayerState = {
   size: string;
   scalePct: number;
   rotateDeg: number;
+  tiltX: number;
   shadowPct: number;
   quad: Quad | null;
   shadowOn: boolean;
   maskEditing: boolean;
   maskBrush: number;
   maskMode: BrushMode;
+  maskVisible: boolean;
 };
 
-type DragMode = "none" | "corner" | "move" | "rotate" | "mask";
+type DragMode = "none" | "corner" | "move" | "rotate" | "mask" | "tilt";
 
 const SCALE_MIN = 40;
 const SCALE_MAX = 180;
 const ROTATE_MIN = -90;
 const ROTATE_MAX = 90;
+const TILT_MIN = -35;
+const TILT_MAX = 35;
+const TILT_FOCUS_MIN = 600;
+const TILT_FOCUS_MAX = 1200;
 
 function dist(a: Point, b: Point) {
   const dx = a.x - b.x;
@@ -53,8 +59,8 @@ function centerOfQuad(q: Quad): Point {
   };
 }
 
-function rotateHandlePosition(quad: Quad, offset: number): Point {
-  const c = centerOfQuad(quad);
+function rotateHandlePosition(quad: Quad, offset: number, center?: Point): Point {
+  const c = center ?? centerOfQuad(quad);
   const topMid = midpoint(quad[0], quad[1]);
   const vx = topMid.x - c.x;
   const vy = topMid.y - c.y;
@@ -78,6 +84,122 @@ function rotatePointAround(p: Point, c: Point, deg: number): Point {
 
 function scalePointAround(p: Point, c: Point, factor: number): Point {
   return { x: c.x + (p.x - c.x) * factor, y: c.y + (p.y - c.y) * factor };
+}
+
+function quadFrame(quad: Quad) {
+  const center = centerOfQuad(quad);
+  const topMid = midpoint(quad[0], quad[1]);
+  const bottomMid = midpoint(quad[3], quad[2]);
+  const leftMid = midpoint(quad[0], quad[3]);
+  const rightMid = midpoint(quad[1], quad[2]);
+
+  const ex = { x: rightMid.x - leftMid.x, y: rightMid.y - leftMid.y };
+  const ey = { x: bottomMid.x - topMid.x, y: bottomMid.y - topMid.y };
+  const width = Math.hypot(ex.x, ex.y);
+  const height = Math.hypot(ey.x, ey.y);
+
+  const bx = width > 1e-4 ? { x: ex.x / width, y: ex.y / width } : { x: 1, y: 0 };
+  const by = height > 1e-4 ? { x: ey.x / height, y: ey.y / height } : { x: 0, y: 1 };
+  const det = bx.x * by.y - bx.y * by.x;
+
+  return { center, bx, by, width, height, det };
+}
+
+function toLocal(p: Point, frame: ReturnType<typeof quadFrame>) {
+  const v = { x: p.x - frame.center.x, y: p.y - frame.center.y };
+  if (Math.abs(frame.det) < 1e-4) {
+    return {
+      x: v.x * frame.bx.x + v.y * frame.bx.y,
+      y: v.x * frame.by.x + v.y * frame.by.y,
+    };
+  }
+  const x = (v.x * frame.by.y - v.y * frame.by.x) / frame.det;
+  const y = (frame.bx.x * v.y - frame.bx.y * v.x) / frame.det;
+  return { x, y };
+}
+
+function fromLocal(local: Point, frame: ReturnType<typeof quadFrame>): Point {
+  return {
+    x: frame.center.x + frame.bx.x * local.x + frame.by.x * local.y,
+    y: frame.center.y + frame.bx.y * local.x + frame.by.y * local.y,
+  };
+}
+
+function getTiltFocus(canvasW: number, canvasH: number) {
+  const base = Math.max(canvasW, canvasH) * 0.9;
+  return clamp(base, TILT_FOCUS_MIN, TILT_FOCUS_MAX);
+}
+
+function applyTiltToQuad(quad: Quad, tiltDeg: number, focus: number): Quad {
+  if (Math.abs(tiltDeg) < 0.01) return quad;
+  const frame = quadFrame(quad);
+  const rad = (tiltDeg * Math.PI) / 180;
+  const sin = Math.sin(rad);
+  const cos = Math.cos(rad);
+  const safeFocus = Math.max(60, focus);
+
+  return quad.map((p) => {
+    const local = toLocal(p, frame);
+    const z = -local.y * sin;
+    const denom = Math.max(80, safeFocus + z);
+    const k = safeFocus / denom;
+    const x = local.x * k;
+    const y = local.y * cos * k;
+    return fromLocal({ x, y }, frame);
+  }) as Quad;
+}
+
+function screenPointToBase(p: Point, baseQuad: Quad, tiltDeg: number, focus: number): Point {
+  if (Math.abs(tiltDeg) < 0.01) return p;
+  const frame = quadFrame(baseQuad);
+  const local = toLocal(p, frame);
+  const rad = (tiltDeg * Math.PI) / 180;
+  const sin = Math.sin(rad);
+  const cos = Math.cos(rad);
+  const denom = cos * focus + local.y * sin;
+  if (Math.abs(denom) < 1e-4) return p;
+  const y = (local.y * focus) / denom;
+  const k = focus / Math.max(60, focus - y * sin);
+  const x = local.x / k;
+  return fromLocal({ x, y }, frame);
+}
+
+type TiltControl = {
+  center: Point;
+  radius: number;
+  handle: Point;
+  handleRadius: number;
+  handleHitRadius: number;
+  handleRange: number;
+};
+
+function getTiltControl(
+  quad: Quad,
+  tiltDeg: number,
+  canvasW: number,
+  canvasH: number,
+  coarse: boolean
+): TiltControl {
+  const frame = quadFrame(quad);
+  const radius = coarse ? 34 : 26;
+  const offset = radius + (coarse ? 18 : 12);
+  const centerCandidate = {
+    x: frame.center.x + frame.bx.x * (frame.width / 2 + offset),
+    y: frame.center.y + frame.bx.y * (frame.width / 2 + offset),
+  };
+
+  const center = {
+    x: clamp(centerCandidate.x, radius + 12, canvasW - radius - 12),
+    y: clamp(centerCandidate.y, radius + 12, canvasH - radius - 12),
+  };
+
+  const handleRange = radius * 0.85;
+  const tiltNorm = clamp(tiltDeg / TILT_MAX, -1, 1);
+  const handle = { x: center.x, y: center.y + tiltNorm * handleRange };
+  const handleRadius = coarse ? 7 : 5;
+  const handleHitRadius = coarse ? 20 : 12;
+
+  return { center, radius, handle, handleRadius, handleHitRadius, handleRange };
 }
 
 function parseSizeArea(sizeLabel: string): number | null {
@@ -171,12 +293,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     size: "",
     scalePct: 100,
     rotateDeg: 0,
+    tiltX: 0,
     shadowPct: 25,
     quad: null,
     shadowOn: true,
     maskEditing: false,
     maskBrush: 24,
     maskMode: "draw",
+    maskVisible: true,
   });
 
   const [layerB, setLayerB] = useState<LayerState>({
@@ -187,12 +311,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     size: "",
     scalePct: 100,
     rotateDeg: 0,
+    tiltX: 0,
     shadowPct: 25,
     quad: null,
     shadowOn: true,
     maskEditing: false,
     maskBrush: 24,
     maskMode: "draw",
+    maskVisible: true,
   });
 
   const getLayer = (id: LayerId) => (id === "A" ? layerA : layerB);
@@ -384,16 +510,27 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     ctx: CanvasRenderingContext2D,
     w: number,
     h: number,
-    options: { includeGuides?: boolean; includeSplitLine?: boolean } = {}
+    options: { includeGuides?: boolean; includeSplitLine?: boolean; includeMaskOverlay?: boolean; forExport?: boolean } = {}
   ) => {
-    const { includeGuides = true, includeSplitLine = true } = options;
+    const { includeGuides = true, includeSplitLine = true, includeMaskOverlay = true, forExport = false } = options;
+    const showGuides = forExport ? false : includeGuides;
+    const showSplitLine = forExport ? false : includeSplitLine;
+    const showMaskOverlay = forExport ? false : includeMaskOverlay;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     drawRoom(ctx, w, h);
 
-    const drawLayer = (layer: LayerState, clip?: { x: number; y: number; w: number; h: number }) => {
-      if (!layer.img || !layer.quad) return;
+    const focus = getTiltFocus(w, h);
+    const quadA = layerA.quad ? applyTiltToQuad(layerA.quad, layerA.tiltX, focus) : null;
+    const quadB = layerB.quad ? applyTiltToQuad(layerB.quad, layerB.tiltX, focus) : null;
+
+    const drawLayer = (
+      layer: LayerState,
+      quad: Quad | null,
+      clip?: { x: number; y: number; w: number; h: number }
+    ) => {
+      if (!layer.img || !quad) return;
       const maskOn = maskHasContentRef.current[layer.id];
 
       if (clip) {
@@ -404,21 +541,40 @@ export default function VrPreview({ locale }: { locale: Locale }) {
       }
 
       if (!maskOn) {
-        if (layer.shadowOn) drawShadow(ctx, layer.quad, layer.shadowPct);
-        drawImageToQuad(ctx, layer.img, layer.quad, 18);
+        if (layer.shadowOn) drawShadow(ctx, quad, layer.shadowPct);
+        drawImageToQuad(ctx, layer.img, quad, 18);
       } else {
         const scratch = ensureScratchCanvas(w, h);
         const sctx = scratch.getContext("2d");
         if (!sctx) return;
         sctx.setTransform(1, 0, 0, 1, 0, 0);
         sctx.clearRect(0, 0, w, h);
-        if (layer.shadowOn) drawShadow(sctx, layer.quad, layer.shadowPct);
-        drawImageToQuad(sctx, layer.img, layer.quad, 18);
+        if (layer.shadowOn) drawShadow(sctx, quad, layer.shadowPct);
+        drawImageToQuad(sctx, layer.img, quad, 18);
         sctx.globalCompositeOperation = "destination-out";
         const mask = getMaskCanvas(layer.id, w, h);
         sctx.drawImage(mask, 0, 0, w, h);
         sctx.globalCompositeOperation = "source-over";
         ctx.drawImage(scratch, 0, 0, w, h);
+      }
+
+      if (showMaskOverlay && layer.maskVisible && maskOn) {
+        const scratch = ensureScratchCanvas(w, h);
+        const sctx = scratch.getContext("2d");
+        if (sctx) {
+          sctx.setTransform(1, 0, 0, 1, 0, 0);
+          sctx.clearRect(0, 0, w, h);
+          const mask = getMaskCanvas(layer.id, w, h);
+          sctx.drawImage(mask, 0, 0, w, h);
+          sctx.globalCompositeOperation = "source-in";
+          sctx.fillStyle = "rgba(239, 68, 68, 0.55)";
+          sctx.fillRect(0, 0, w, h);
+          sctx.globalCompositeOperation = "source-over";
+          ctx.save();
+          ctx.globalAlpha = 0.65;
+          ctx.drawImage(scratch, 0, 0, w, h);
+          ctx.restore();
+        }
       }
 
       if (clip) ctx.restore();
@@ -427,12 +583,12 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     const la = layerA;
     const lb = layerB;
 
-    if (compareMode && la.img && la.quad && lb.img && lb.quad) {
-      drawLayer(la);
+    if (compareMode && la.img && quadA && lb.img && quadB) {
+      drawLayer(la, quadA);
       const splitX = (compareSplit / 100) * w;
-      drawLayer(lb, { x: splitX, y: 0, w: w - splitX, h });
+      drawLayer(lb, quadB, { x: splitX, y: 0, w: w - splitX, h });
 
-      if (includeSplitLine) {
+      if (showSplitLine) {
         ctx.save();
         ctx.strokeStyle = "rgba(0,0,0,0.6)";
         ctx.lineWidth = 2;
@@ -443,18 +599,19 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         ctx.restore();
       }
     } else {
-      drawLayer(la);
-      drawLayer(lb);
+      drawLayer(la, quadA);
+      drawLayer(lb, quadB);
     }
 
-    if (includeGuides) {
+    if (showGuides) {
       const act = active === "A" ? la : lb;
-      if (act.quad) {
+      const actQuad = active === "A" ? quadA : quadB;
+      if (act.quad && actQuad) {
         const cornerRadius = isCoarsePointer ? 12 : 7;
         const rotateRadius = isCoarsePointer ? 14 : 9;
         const rotateOffset = isCoarsePointer ? 64 : 46;
         const center = centerOfQuad(act.quad);
-        const rotatePos = rotateHandlePosition(act.quad, rotateOffset);
+        const rotatePos = rotateHandlePosition(actQuad, rotateOffset, center);
 
         ctx.save();
         ctx.strokeStyle = "rgba(0,0,0,0.5)";
@@ -467,7 +624,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
 
         ctx.save();
         ctx.fillStyle = "#111827";
-        for (const p of act.quad) {
+        for (const p of actQuad) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, cornerRadius, 0, Math.PI * 2);
           ctx.fill();
@@ -482,6 +639,72 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         ctx.arc(rotatePos.x, rotatePos.y, rotateRadius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+        ctx.restore();
+
+        const tiltControl = getTiltControl(actQuad, act.tiltX, w, h, isCoarsePointer);
+        const tiltActive = dragRef.current.mode === "tilt";
+        let arrowDir = {
+          x: tiltControl.handle.x - tiltControl.center.x,
+          y: tiltControl.handle.y - tiltControl.center.y,
+        };
+        let arrowLen = Math.hypot(arrowDir.x, arrowDir.y);
+        if (arrowLen < 1e-3) {
+          arrowDir = { x: 0, y: -1 };
+          arrowLen = 1;
+        }
+        const ux = arrowDir.x / arrowLen;
+        const uy = arrowDir.y / arrowLen;
+        const perp = { x: -uy, y: ux };
+        const headSize = isCoarsePointer ? 9 : 7;
+
+        ctx.save();
+        ctx.lineWidth = isCoarsePointer ? 3 : 2;
+        ctx.strokeStyle = tiltActive ? "rgba(17,24,39,0.9)" : "rgba(17,24,39,0.6)";
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.arc(tiltControl.center.x, tiltControl.center.y, tiltControl.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.strokeStyle = tiltActive ? "rgba(17,24,39,0.95)" : "rgba(17,24,39,0.7)";
+        ctx.beginPath();
+        ctx.moveTo(tiltControl.center.x, tiltControl.center.y);
+        ctx.lineTo(tiltControl.handle.x, tiltControl.handle.y);
+        ctx.stroke();
+
+        const tip = tiltControl.handle;
+        const left = {
+          x: tip.x - ux * headSize + perp.x * headSize * 0.7,
+          y: tip.y - uy * headSize + perp.y * headSize * 0.7,
+        };
+        const right = {
+          x: tip.x - ux * headSize - perp.x * headSize * 0.7,
+          y: tip.y - uy * headSize - perp.y * headSize * 0.7,
+        };
+        ctx.fillStyle = tiltActive ? "#111827" : "#1f2937";
+        ctx.beginPath();
+        ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(left.x, left.y);
+        ctx.lineTo(right.x, right.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(tip.x, tip.y, tiltControl.handleRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.fillStyle = "rgba(17,24,39,0.85)";
+        ctx.font = `${isCoarsePointer ? 12 : 11}px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const tiltLabel = isRu ? "Наклон" : "Tilt";
+        const tiltValue = `${Math.round(act.tiltX)}\u00b0`;
+        ctx.fillText(
+          `${tiltLabel}: ${tiltValue}`,
+          tiltControl.center.x + tiltControl.radius + 10,
+          tiltControl.center.y
+        );
         ctx.restore();
       }
     }
@@ -498,7 +721,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
   useEffect(() => {
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomImg, layerA, layerB, compareMode, compareSplit, active]);
+  }, [roomImg, layerA, layerB, compareMode, compareSplit, active, isCoarsePointer]);
 
   // Interaction
   const dragRef = useRef<{
@@ -509,6 +732,8 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     startAngle: number;
     startRotate: number;
     center: Point | null;
+    tiltCenter: Point | null;
+    tiltRange: number;
   }>({
     mode: "none",
     cornerIndex: -1,
@@ -517,6 +742,8 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     startAngle: 0,
     startRotate: 0,
     center: null,
+    tiltCenter: null,
+    tiltRange: 1,
   });
 
   const getPointer = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
@@ -577,11 +804,33 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     if (!act.quad) return;
 
     const isTouchInput = isCoarsePointer || e.pointerType === "touch";
+    const canvas = e.currentTarget;
+    const focus = getTiltFocus(canvas.width, canvas.height);
+    const displayQuad = applyTiltToQuad(act.quad, act.tiltX, focus);
+    const tiltControl = getTiltControl(displayQuad, act.tiltX, canvas.width, canvas.height, isTouchInput);
 
     if (pointersRef.current.size >= 2) {
       if (!act.maskEditing) beginGesture(act);
       dragRef.current.mode = "none";
       dragRef.current.pointerId = null;
+      dragRef.current.tiltCenter = null;
+      dragRef.current.tiltRange = 1;
+      return;
+    }
+
+    if (dist(p, tiltControl.handle) <= tiltControl.handleHitRadius) {
+      dragRef.current = {
+        mode: "tilt",
+        cornerIndex: -1,
+        last: p,
+        pointerId: e.pointerId,
+        startAngle: 0,
+        startRotate: 0,
+        center: null,
+        tiltCenter: tiltControl.center,
+        tiltRange: tiltControl.handleRange,
+      };
+      scheduleDraw();
       return;
     }
 
@@ -594,6 +843,8 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         startAngle: 0,
         startRotate: 0,
         center: null,
+        tiltCenter: null,
+        tiltRange: 1,
       };
       drawMaskStroke(active, p, p, act.maskBrush, act.maskMode);
       return;
@@ -602,7 +853,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     const cornerHit = isTouchInput ? 32 : 14;
     const rotateHit = isTouchInput ? 36 : 16;
     const rotateOffset = isTouchInput ? 64 : 46;
-    const rotatePos = rotateHandlePosition(act.quad, rotateOffset);
+    const rotatePos = rotateHandlePosition(displayQuad, rotateOffset, centerOfQuad(act.quad));
 
     if (dist(p, rotatePos) <= rotateHit) {
       const center = centerOfQuad(act.quad);
@@ -614,12 +865,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         startAngle: Math.atan2(p.y - center.y, p.x - center.x),
         startRotate: act.rotateDeg,
         center,
+        tiltCenter: null,
+        tiltRange: 1,
       };
       return;
     }
 
     for (let i = 0; i < 4; i++) {
-      if (dist(p, act.quad[i]) <= cornerHit) {
+      if (dist(p, displayQuad[i]) <= cornerHit) {
         dragRef.current = {
           mode: "corner",
           cornerIndex: i,
@@ -628,12 +881,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
           startAngle: 0,
           startRotate: 0,
           center: null,
+          tiltCenter: null,
+          tiltRange: 1,
         };
         return;
       }
     }
 
-    if (pointInQuad(p, act.quad)) {
+    if (pointInQuad(p, displayQuad)) {
       dragRef.current = {
         mode: "move",
         cornerIndex: -1,
@@ -642,6 +897,8 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         startAngle: 0,
         startRotate: 0,
         center: null,
+        tiltCenter: null,
+        tiltRange: 1,
       };
     }
   };
@@ -656,6 +913,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
 
     const act = getLayer(active);
     if (!act.quad) return;
+
+    const d = dragRef.current;
+    if (d.mode === "tilt" && d.pointerId === e.pointerId && d.tiltCenter) {
+      const range = Math.max(1, d.tiltRange || 1);
+      const nextTilt = clamp(((p.y - d.tiltCenter.y) / range) * TILT_MAX, TILT_MIN, TILT_MAX);
+      applyTilt(active, nextTilt);
+      return;
+    }
 
     if (act.maskEditing) {
       if (dragRef.current.mode === "mask" && dragRef.current.pointerId === e.pointerId) {
@@ -687,7 +952,6 @@ export default function VrPreview({ locale }: { locale: Locale }) {
 
     if (gestureRef.current.active) endGesture();
 
-    const d = dragRef.current;
     if (d.mode === "none" || d.pointerId !== e.pointerId) return;
 
     if (d.mode === "rotate") {
@@ -706,7 +970,9 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     const next: LayerState = { ...act, quad: [...act.quad.map((pt) => ({ ...pt }))] as Quad };
 
     if (d.mode === "corner") {
-      next.quad![d.cornerIndex] = { x: next.quad![d.cornerIndex].x + dx, y: next.quad![d.cornerIndex].y + dy };
+      const canvas = canvasRef.current;
+      const focus = canvas ? getTiltFocus(canvas.width, canvas.height) : TILT_FOCUS_MAX;
+      next.quad![d.cornerIndex] = screenPointToBase(p, act.quad, act.tiltX, focus);
     } else if (d.mode === "move") {
       next.quad = next.quad!.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) as Quad;
     }
@@ -718,9 +984,13 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     pointersRef.current.delete(e.pointerId);
     if (pointersRef.current.size < 2 && gestureRef.current.active) endGesture();
     if (dragRef.current.pointerId === e.pointerId) {
+      const wasTilt = dragRef.current.mode === "tilt";
       dragRef.current.mode = "none";
       dragRef.current.cornerIndex = -1;
       dragRef.current.pointerId = null;
+      dragRef.current.tiltCenter = null;
+      dragRef.current.tiltRange = 1;
+      if (wasTilt) scheduleDraw();
     }
   };
 
@@ -744,6 +1014,13 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     const c = centerOfQuad(layer.quad);
     const nextQuad = layer.quad.map((p) => rotatePointAround(p, c, delta)) as Quad;
     setLayer(id, { ...layer, rotateDeg: clamped, quad: nextQuad });
+  };
+
+  const applyTilt = (id: LayerId, nextDeg: number) => {
+    const layer = getLayer(id);
+    const clamped = clamp(nextDeg, TILT_MIN, TILT_MAX);
+    if (clamped === layer.tiltX) return;
+    setLayer(id, { ...layer, tiltX: clamped });
   };
 
   const applyShadow = (id: LayerId, nextPct: number) => {
@@ -821,6 +1098,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         quad,
         scalePct: 100,
         rotateDeg: 0,
+        tiltX: 0,
         shadowPct: 25,
         shadowOn: true,
       };
@@ -847,7 +1125,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
        out.height = c.height;
        const octx = out.getContext("2d");
        if (!octx) throw new Error("Canvas not supported");
-       renderScene(octx, out.width, out.height, { includeGuides: false, includeSplitLine: false });
+       renderScene(octx, out.width, out.height, { forExport: true });
 
        const blob: Blob = await new Promise((resolve, reject) => {
          out.toBlob(
@@ -1129,6 +1407,18 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                         onChange={(e) => setLayer(active, { ...activeLayer, maskEditing: e.target.checked })}
                       />
                       <span>{isRu ? "\u0412\u043a\u043b" : "On"}</span>
+                    </label>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-600">
+                    <span>{isRu ? "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u043c\u0430\u0441\u043a\u0443" : "Show mask"}</span>
+                    <label className="inline-flex items-center gap-2 select-none">
+                      <input
+                        type="checkbox"
+                        checked={activeLayer.maskVisible}
+                        onChange={(e) => setLayer(active, { ...activeLayer, maskVisible: e.target.checked })}
+                      />
+                      <span>{isRu ? "\u0412\u0438\u0434\u043d\u043e" : "Show"}</span>
                     </label>
                   </div>
 
