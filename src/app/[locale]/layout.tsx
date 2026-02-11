@@ -14,6 +14,7 @@ import LangSetter from "@/components/shared/LangSetter";
 import { CurrencyProvider } from "@/context/CurrencyContext";
 import { fetchEURtoRUBRate } from "@/lib/currency";
 import { Toaster } from "sonner";
+import Script from "next/script";
 
 type RootLayoutProps = Readonly<{
   children: React.ReactNode;
@@ -33,6 +34,14 @@ const RootLayout: FC<RootLayoutProps> = ({ children, params }) => {
     <LocaleProvider dictionary={dictionary}>
       <CurrencyProvider eurToRubRate={eurToRubRate}>
         <LangSetter locale={locale} />
+        <Script
+          async
+          id="roomvoAssistant"
+          strategy="afterInteractive"
+          src="https://www.roomvo.com/static/scripts/b2b/common/assistant.js"
+          data-locale={locale === "ru" ? "ru-ru" : "en-us"}
+          data-position="bottom-right"
+        />
         {children}
         <Sidebar locale={locale} />
         <Suspense fallback={null}>
