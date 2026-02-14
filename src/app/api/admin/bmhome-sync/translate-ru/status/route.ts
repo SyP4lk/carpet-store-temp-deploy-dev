@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -48,6 +49,35 @@ function parseProgress(logTail: string) {
   return { done, total, stage }
 }
 
+function shouldRevalidate(running: boolean, logTail: string, done: number, total: number): boolean {
+  if (running) return false
+  if (logTail.includes('BMHOME RU translation finished.')) return true
+  return total > 0 && done >= total
+}
+
+function revalidateTranslatedCatalog(jobId: string, logsDir: string) {
+  const doneFile = path.join(logsDir, `${jobId}.revalidated`)
+  const lockFile = path.join(logsDir, `${jobId}.revalidating`)
+
+  if (fs.existsSync(doneFile) || fs.existsSync(lockFile)) return
+  fs.writeFileSync(lockFile, String(Date.now()))
+
+  try {
+    revalidatePath('/ru', 'layout')
+    revalidatePath('/en', 'layout')
+    revalidatePath('/ru/rugs/[rugId]', 'page')
+    revalidatePath('/en/rugs/[rugId]', 'page')
+    revalidatePath('/ru/[filter]', 'page')
+    revalidatePath('/en/[filter]', 'page')
+    revalidateTag('products')
+    fs.writeFileSync(doneFile, String(Date.now()))
+  } finally {
+    if (fs.existsSync(lockFile)) {
+      fs.unlinkSync(lockFile)
+    }
+  }
+}
+
 export async function GET(req: Request) {
   const session = await requireAdmin()
   if (!session) {
@@ -75,6 +105,14 @@ export async function GET(req: Request) {
 
   const logTail = readLogTail(logFile, 20)
   const progress = parseProgress(logTail)
+
+  if (shouldRevalidate(running, logTail, progress.done, progress.total)) {
+    try {
+      revalidateTranslatedCatalog(jobId, logsDir)
+    } catch (error) {
+      console.error('Failed to revalidate catalog after BMHOME translate:', error)
+    }
+  }
 
   const response = NextResponse.json({
     running,

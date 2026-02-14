@@ -116,11 +116,55 @@ export async function getProductsByFilter(filter: {
   return products.map(transformProduct);
 }
 
+function htmlToPlainText(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return ''
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hasCyrillic(text: string): boolean {
+  return /\p{Script=Cyrillic}/u.test(text)
+}
+
 function transformProduct(product: any): RugProduct {
+  const bmhomeMeta = (product.sourceMeta as any)?.bmhome ?? {}
+  const fallbackDescEn =
+    htmlToPlainText(bmhomeMeta.shortHtml) || htmlToPlainText(bmhomeMeta.descriptionHtml)
+  const fallbackDescRu =
+    htmlToPlainText(bmhomeMeta.shortHtmlRu) || htmlToPlainText(bmhomeMeta.descriptionHtmlRu)
+  const enDescRaw = product.descriptions.find((d: any) => d.locale === 'en')?.description || ''
+  const ruDescRaw = product.descriptions.find((d: any) => d.locale === 'ru')?.description || ''
+
   const getName = (locale: string) =>
     product.productNames.find((n: any) => n.locale === locale)?.name || ''
-  const getDesc = (locale: string) =>
-    product.descriptions.find((d: any) => d.locale === locale)?.description || ''
+  const getDesc = (locale: string) => {
+    if (locale === 'en') {
+      return enDescRaw || fallbackDescEn
+    }
+
+    const ruDirect = ruDescRaw.trim()
+    const enDirect = enDescRaw.trim()
+
+    if (!ruDirect) {
+      return fallbackDescRu || enDirect || fallbackDescEn
+    }
+
+    // If RU still looks untranslated, prefer translated BMHOME meta produced by translator job.
+    const ruLooksUntranslated = ruDirect === enDirect || !hasCyrillic(ruDirect)
+    if (ruLooksUntranslated && fallbackDescRu) {
+      return fallbackDescRu
+    }
+
+    return ruDirect
+  }
   const getFeature = (locale: string) => {
     const feature = product.features.find((f: any) => f.locale === locale)
     return {

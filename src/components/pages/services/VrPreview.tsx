@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Locale } from "@/localization/config";
 import type { RugProduct } from "@/types/product";
 import { drawImageToQuad, drawShadow, pointInQuad, type Point, type Quad } from "./vr/warp";
+import VrTutorial, { type VrTutorialStep } from "./vr/VrTutorial";
 
 type LayerId = "A" | "B";
 
@@ -37,6 +38,29 @@ const TILT_MIN = -35;
 const TILT_MAX = 35;
 const TILT_FOCUS_MIN = 600;
 const TILT_FOCUS_MAX = 1200;
+const VR_TUTORIAL_SEEN_KEY = "carpet_vr_tutorial_seen_v1";
+const VR_TUTORIAL_LEGACY_KEY = "vr_tutorial_seen_v1";
+const VR_TUTORIAL_LEGACY_DONE_KEY = "vr_tutorial_done_v1";
+
+function createInitialLayer(id: LayerId): LayerState {
+  return {
+    id,
+    product: null,
+    img: null,
+    article: "",
+    size: "",
+    scalePct: 100,
+    rotateDeg: 0,
+    tiltX: 0,
+    shadowPct: 25,
+    quad: null,
+    shadowOn: true,
+    maskEditing: false,
+    maskBrush: 24,
+    maskMode: "draw",
+    maskVisible: true,
+  };
+}
 
 function dist(a: Point, b: Point) {
   const dx = a.x - b.x;
@@ -265,6 +289,21 @@ export default function VrPreview({ locale }: { locale: Locale }) {
   const isRu = locale === "ru";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const uploadRef = useRef<HTMLLabelElement | null>(null);
+  const articleBlockRef = useRef<HTMLDivElement | null>(null);
+  const articleRef = useRef<HTMLInputElement | null>(null);
+  const findRef = useRef<HTMLButtonElement | null>(null);
+  const sizeRef = useRef<HTMLSelectElement | null>(null);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
+  const shadowRef = useRef<HTMLDivElement | null>(null);
+  const hintRef = useRef<HTMLDivElement | null>(null);
+  const compareRef = useRef<HTMLButtonElement | null>(null);
+  const resetRef = useRef<HTMLButtonElement | null>(null);
+  const downloadRef = useRef<HTMLButtonElement | null>(null);
+  const formatRef = useRef<HTMLSelectElement | null>(null);
+  const maskPanelRef = useRef<HTMLDivElement | null>(null);
+  const tutorialAutoStartRef = useRef(false);
 
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const setRoomUrlSafe = (next: string | null) => {
@@ -284,42 +323,10 @@ export default function VrPreview({ locale }: { locale: Locale }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadFormat, setDownloadFormat] = useState<"png" | "jpg">("png");
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
-  const [layerA, setLayerA] = useState<LayerState>({
-    id: "A",
-    product: null,
-    img: null,
-    article: "",
-    size: "",
-    scalePct: 100,
-    rotateDeg: 0,
-    tiltX: 0,
-    shadowPct: 25,
-    quad: null,
-    shadowOn: true,
-    maskEditing: false,
-    maskBrush: 24,
-    maskMode: "draw",
-    maskVisible: true,
-  });
-
-  const [layerB, setLayerB] = useState<LayerState>({
-    id: "B",
-    product: null,
-    img: null,
-    article: "",
-    size: "",
-    scalePct: 100,
-    rotateDeg: 0,
-    tiltX: 0,
-    shadowPct: 25,
-    quad: null,
-    shadowOn: true,
-    maskEditing: false,
-    maskBrush: 24,
-    maskMode: "draw",
-    maskVisible: true,
-  });
+  const [layerA, setLayerA] = useState<LayerState>(() => createInitialLayer("A"));
+  const [layerB, setLayerB] = useState<LayerState>(() => createInitialLayer("B"));
 
   const getLayer = (id: LayerId) => (id === "A" ? layerA : layerB);
   const setLayer = (id: LayerId, next: LayerState) => (id === "A" ? setLayerA(next) : setLayerB(next));
@@ -345,6 +352,48 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     startScale: 100,
     startRotate: 0,
   });
+
+  const openTutorial = useCallback(() => {
+    setActive("A");
+    setTutorialOpen(true);
+  }, []);
+
+  const closeTutorial = useCallback(() => {
+    setTutorialOpen(false);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(VR_TUTORIAL_SEEN_KEY, "1");
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tutorialAutoStartRef.current) return;
+    tutorialAutoStartRef.current = true;
+    if (typeof window === "undefined") return;
+
+    try {
+      const hasSeen = window.localStorage.getItem(VR_TUTORIAL_SEEN_KEY);
+      const hasLegacySeen = window.localStorage.getItem(VR_TUTORIAL_LEGACY_KEY);
+      const hasLegacyDone = window.localStorage.getItem(VR_TUTORIAL_LEGACY_DONE_KEY);
+      if (hasSeen || hasLegacySeen || hasLegacyDone) {
+        if (!hasSeen && (hasLegacySeen || hasLegacyDone)) {
+          window.localStorage.setItem(VR_TUTORIAL_SEEN_KEY, "1");
+        }
+        return;
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    const timer = window.setTimeout(() => {
+      setActive("A");
+      setTutorialOpen(true);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Resize canvas to container
   useEffect(() => {
@@ -1167,6 +1216,138 @@ export default function VrPreview({ locale }: { locale: Locale }) {
   const activeLayer = getLayer(active);
   const canDownload = !!roomImg && (!!layerA.img || !!layerB.img);
 
+  const resetWorkspace = () => {
+    const initialA = createInitialLayer("A");
+    const initialB = createInitialLayer("B");
+
+    if (isCoarsePointer) {
+      initialA.maskBrush = 40;
+      initialB.maskBrush = 40;
+    }
+
+    pointersRef.current.clear();
+    gestureRef.current = {
+      active: false,
+      pointerIds: null,
+      startDist: 1,
+      startAngle: 0,
+      startScale: 100,
+      startRotate: 0,
+    };
+    dragRef.current = {
+      mode: "none",
+      cornerIndex: -1,
+      last: { x: 0, y: 0 },
+      pointerId: null,
+      startAngle: 0,
+      startRotate: 0,
+      center: null,
+      tiltCenter: null,
+      tiltRange: 1,
+    };
+
+    setError(null);
+    setLoading(null);
+    setActive("A");
+    setCompareMode(false);
+    setCompareSplit(50);
+    setDownloadFormat("png");
+    setLayerA(initialA);
+    setLayerB(initialB);
+    setRoomImg(null);
+    setRoomUrlSafe(null);
+    resetMasks();
+  };
+
+  const tutorialSteps = useMemo<VrTutorialStep[]>(
+    () => [
+      {
+        id: "vr-title",
+        text: isRu
+          ? "Шаг 1. Это VR примерка: загружаете фото комнаты и сразу видите ковер в интерьере."
+          : "Step 1. This is VR try-on: upload a room photo and preview a rug in your interior.",
+      },
+      {
+        id: "upload-photo",
+        text: isRu ? "Шаг 2. Загрузите фото комнаты." : "Step 2. Upload a room photo.",
+        statusNote: roomUrl || roomImg ? (isRu ? "Фото загружено." : "Photo uploaded.") : undefined,
+      },
+      {
+        id: "choose-rug",
+        text: isRu
+          ? "Шаг 3. Выберите ковер: введите артикул, нажмите Найти и укажите размер."
+          : "Step 3. Choose a rug: enter the article, press Find, then select size.",
+        statusNote:
+          activeLayer.product && activeLayer.size
+            ? isRu
+              ? "Ковер и размер выбраны."
+              : "Rug and size selected."
+            : undefined,
+      },
+      {
+        id: "transform-controls",
+        text: isRu
+          ? "Шаг 4. Управляйте ковром: перемещайте на холсте, меняйте масштаб, поворот и жесты."
+          : "Step 4. Transform the rug: move it on canvas, adjust scale, rotation, and gestures.",
+      },
+      {
+        id: "mask-controls",
+        text: isRu
+          ? "Шаг 5. Используйте маску/ластик, чтобы скрыть части ковра под мебелью."
+          : "Step 5. Use mask/eraser to hide rug parts under furniture.",
+      },
+      {
+        id: "reset",
+        text: isRu
+          ? "Шаг 6. Кнопка Сброс очищает сцену и возвращает стартовое состояние."
+          : "Step 6. Reset clears the scene and returns to the initial state.",
+      },
+      {
+        id: "export",
+        text: isRu ? "Шаг 7. Сохраните результат кнопкой Скачать." : "Step 7. Export the result with Download.",
+        statusNote: canDownload ? (isRu ? "Готово к экспорту." : "Ready to export.") : undefined,
+      },
+    ],
+    [activeLayer.product, activeLayer.size, canDownload, isRu, roomImg, roomUrl]
+  );
+
+  const getTutorialTargetRect = useCallback(
+    (stepId: string): DOMRect | null => {
+      const getRect = (el: Element | null): DOMRect | null => {
+        if (!el) return null;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        return rect;
+      };
+      const getByTour = (tourId: string): Element | null => {
+        if (typeof document === "undefined") return null;
+        return document.querySelector(`[data-tour="${tourId}"]`);
+      };
+      const byStepId = getRect(getByTour(stepId));
+      if (byStepId) return byStepId;
+
+      switch (stepId) {
+        case "vr-title":
+          return getRect(titleRef.current);
+        case "upload-photo":
+          return getRect(uploadRef.current);
+        case "choose-rug":
+          return getRect(articleBlockRef.current ?? articleRef.current ?? findRef.current ?? sizeRef.current);
+        case "transform-controls":
+          return getRect(settingsRef.current ?? shadowRef.current ?? hostRef.current);
+        case "mask-controls":
+          return getRect(maskPanelRef.current ?? hintRef.current);
+        case "reset":
+          return getRect(resetRef.current);
+        case "export":
+          return getRect(downloadRef.current ?? formatRef.current);
+        default:
+          return null;
+      }
+    },
+    []
+  );
+
   const sizeOptions = (p: RugProduct | null) =>
     (p?.sizes ?? []).filter((s) => !/özel\s*ölçü|ozel\s*olcu/i.test(s));
 
@@ -1174,7 +1355,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <div className="p-5 border-b border-gray-200 flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3 ref={titleRef} data-tour="vr-title" className="text-lg font-semibold text-gray-900">
             {isRu ? "VR примерка" : "VR try-on"}
           </h3>
           <p className="text-sm text-gray-600">
@@ -1188,22 +1369,44 @@ export default function VrPreview({ locale }: { locale: Locale }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
+            ref={compareRef}
+            data-tour="compare-mode"
             type="button"
             onClick={() => setCompareMode((v) => !v)}
             className="h-10 px-4 rounded-lg border border-gray-300 text-gray-800 text-sm font-semibold hover:bg-gray-50 whitespace-nowrap"
           >
             {compareMode ? (isRu ? "Обычный режим" : "Normal") : (isRu ? "Сравнение" : "Compare")}
           </button>
-           <select
-             id="vr-download-format"
-             className="h-10 px-2 rounded-lg border border-gray-300 bg-white text-sm"
-             value={downloadFormat}
-             onChange={(e) => setDownloadFormat(e.target.value as "png" | "jpg")}
-           >
-             <option value="png">PNG</option>
-             <option value="jpg">JPG</option>
-           </select>
           <button
+            ref={resetRef}
+            data-tour="reset"
+            type="button"
+            onClick={resetWorkspace}
+            className="h-10 px-4 rounded-lg border border-gray-300 text-gray-800 text-sm font-semibold hover:bg-gray-50 whitespace-nowrap"
+          >
+            {isRu ? "Сброс" : "Reset"}
+          </button>
+          <button
+            type="button"
+            onClick={openTutorial}
+            className="h-10 px-4 rounded-lg border border-gray-300 text-gray-800 text-sm font-semibold hover:bg-gray-50 whitespace-nowrap"
+          >
+            {isRu ? "Обучение" : "Help"}
+          </button>
+          <select
+            ref={formatRef}
+            data-tour="download-format"
+            id="vr-download-format"
+            className="h-10 px-2 rounded-lg border border-gray-300 bg-white text-sm"
+            value={downloadFormat}
+            onChange={(e) => setDownloadFormat(e.target.value as "png" | "jpg")}
+          >
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+          <button
+            ref={downloadRef}
+            data-tour="export"
             type="button"
             onClick={download}
             disabled={!canDownload}
@@ -1216,7 +1419,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-0">
         <div className="lg:col-span-3 p-5">
-          <div ref={hostRef} className="min-h-[420px] md:min-h-[560px] rounded-xl border border-gray-200 bg-gray-50 overflow-hidden relative">
+          <div ref={hostRef} data-tour="canvas-host" className="min-h-[420px] md:min-h-[560px] rounded-xl border border-gray-200 bg-gray-50 overflow-hidden relative">
             <canvas
               ref={canvasRef}
               className="absolute inset-0 w-full h-full touch-none"
@@ -1229,9 +1432,19 @@ export default function VrPreview({ locale }: { locale: Locale }) {
           </div>
 
           <div className="mt-4 flex flex-col sm:flex-row gap-3">
-            <label className="inline-flex items-center justify-center h-11 px-4 rounded-lg bg-black text-white font-semibold cursor-pointer hover:bg-black/90">
+            <label
+              ref={uploadRef}
+              data-tour="upload-photo"
+              className="inline-flex items-center justify-center h-11 px-4 rounded-lg bg-black text-white font-semibold cursor-pointer hover:bg-black/90"
+            >
               {isRu ? "Загрузить фото" : "Upload photo"}
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => onRoomFile(e.target.files?.[0] ?? null)} />
+              <input
+                data-tour="upload-input"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => onRoomFile(e.target.files?.[0] ?? null)}
+              />
             </label>
 
             <button
@@ -1269,19 +1482,23 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                 {active === "A" ? (isRu ? "Ковер A" : "Rug A") : (isRu ? "Ковер B" : "Rug B")}
               </p>
 
-              <div className="mt-3">
+              <div data-tour="choose-rug" className="mt-3">
                 <label className="text-xs font-semibold uppercase text-gray-600">
                   {isRu ? "Артикул" : "Article"}
                 </label>
 
-                <div className="mt-1 flex flex-col gap-2">
+                <div ref={articleBlockRef} data-tour="article-find" className="mt-1 flex flex-col gap-2">
                   <input
+                    ref={articleRef}
+                    data-tour="article-input"
                     className="h-10 px-4 rounded-lg bg-black text-white font-semibold hover:bg-black/90"
                     value={activeLayer.article}
                     onChange={(e) => setLayer(active, { ...activeLayer, article: e.target.value })}
                     placeholder={isRu ? "Например: 2025-C-4395" : "e.g. 2025-C-4395"}
                   />
                   <button
+                    ref={findRef}
+                    data-tour="find-button"
                     type="button"
                     onClick={() => findProduct(active)}
                     className="h-10 px-4 rounded-lg bg-black text-white font-semibold hover:bg-black/90"
@@ -1306,6 +1523,8 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                 </label>
 
                 <select
+                  ref={sizeRef}
+                  data-tour="size-select"
                   id="vr-size-select"
                   className="mt-1 w-full h-10 px-3 rounded-lg border border-gray-300 bg-white"
                   value={activeLayer.size}
@@ -1323,7 +1542,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
 
               
               
-              <div className="mt-4 space-y-3">
+              <div ref={settingsRef} data-tour="transform-controls" className="mt-4 space-y-3">
                 <div>
                   <div className="flex justify-between text-xs text-gray-600">
                     <span>{isRu ? "\u041c\u0430\u0441\u0448\u0442\u0430\u0431" : "Scale"}</span>
@@ -1372,7 +1591,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                   </div>
                 </div>
 
-                <div>
+                <div ref={shadowRef}>
                   <div className="flex items-center justify-between text-xs text-gray-600">
                     <span>{isRu ? "\u0422\u0435\u043d\u044c" : "Shadow"}</span>
 
@@ -1397,7 +1616,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                   />
                 </div>
 
-                <div>
+                <div ref={maskPanelRef} data-tour="mask-controls">
                   <div className="flex items-center justify-between text-xs text-gray-600">
                     <span>{isRu ? "\u041c\u0430\u0441\u043a\u0430" : "Mask"}</span>
                     <label className="inline-flex items-center gap-2 select-none">
@@ -1410,10 +1629,11 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                     </label>
                   </div>
 
-                  <div className="mt-2 flex items-center justify-between text-xs text-gray-600">
+                  <div data-tour="show-mask" className="mt-2 flex items-center justify-between text-xs text-gray-600">
                     <span>{isRu ? "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u043c\u0430\u0441\u043a\u0443" : "Show mask"}</span>
                     <label className="inline-flex items-center gap-2 select-none">
                       <input
+                        data-tour="show-mask"
                         type="checkbox"
                         checked={activeLayer.maskVisible}
                         onChange={(e) => setLayer(active, { ...activeLayer, maskVisible: e.target.checked })}
@@ -1466,7 +1686,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                 </div>
               </div>
 
-              <div className="mt-4 text-xs text-gray-500">
+              <div ref={hintRef} className="mt-4 text-xs text-gray-500">
                 {isRu
                   ? "Перспектива: перетаскивайте точки по углам ковра. Перемещение: тяните внутри ковра."
                   : "Perspective: drag corner points. Move: drag inside the rug."}
@@ -1481,6 +1701,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
           </div>
         </div>
       </div>
+
+      <VrTutorial
+        isOpen={tutorialOpen}
+        locale={isRu ? "ru" : "en"}
+        steps={tutorialSteps}
+        getTargetRect={getTutorialTargetRect}
+        onClose={closeTutorial}
+      />
     </div>
   );
 }
