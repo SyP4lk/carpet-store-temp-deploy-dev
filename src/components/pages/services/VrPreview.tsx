@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Locale } from "@/localization/config";
 import type { RugProduct } from "@/types/product";
 import { drawImageToQuad, drawShadow, pointInQuad, type Point, type Quad } from "./vr/warp";
-import VrTutorial, { type VrTutorialStep } from "./vr/VrTutorial";
 
 type LayerId = "A" | "B";
 
@@ -38,9 +38,7 @@ const TILT_MIN = -35;
 const TILT_MAX = 35;
 const TILT_FOCUS_MIN = 600;
 const TILT_FOCUS_MAX = 1200;
-const VR_TUTORIAL_SEEN_KEY = "carpet_vr_tutorial_seen_v1";
-const VR_TUTORIAL_LEGACY_KEY = "vr_tutorial_seen_v1";
-const VR_TUTORIAL_LEGACY_DONE_KEY = "vr_tutorial_done_v1";
+const VR_VIDEO_TUTORIAL_SEEN_KEY = "carpet_vr_video_tutorial_seen_v1";
 
 function createInitialLayer(id: LayerId): LayerState {
   return {
@@ -303,7 +301,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
   const downloadRef = useRef<HTMLButtonElement | null>(null);
   const formatRef = useRef<HTMLSelectElement | null>(null);
   const maskPanelRef = useRef<HTMLDivElement | null>(null);
-  const tutorialAutoStartRef = useRef(false);
+  const videoTutorialAutoStartRef = useRef(false);
 
   const [roomUrl, setRoomUrl] = useState<string | null>(null);
   const setRoomUrlSafe = (next: string | null) => {
@@ -323,7 +321,8 @@ export default function VrPreview({ locale }: { locale: Locale }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadFormat, setDownloadFormat] = useState<"png" | "jpg">("png");
-  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [videoTutorialOpen, setVideoTutorialOpen] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   const [layerA, setLayerA] = useState<LayerState>(() => createInitialLayer("A"));
   const [layerB, setLayerB] = useState<LayerState>(() => createInitialLayer("B"));
@@ -353,47 +352,64 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     startRotate: 0,
   });
 
-  const openTutorial = useCallback(() => {
-    setActive("A");
-    setTutorialOpen(true);
+  const openVideoTutorial = useCallback(() => {
+    setVideoTutorialOpen(true);
   }, []);
 
-  const closeTutorial = useCallback(() => {
-    setTutorialOpen(false);
+  const closeVideoTutorial = useCallback(() => {
+    setVideoTutorialOpen(false);
     if (typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(VR_TUTORIAL_SEEN_KEY, "1");
+      window.localStorage.setItem(VR_VIDEO_TUTORIAL_SEEN_KEY, "1");
     } catch {
       // ignore storage errors
     }
   }, []);
 
   useEffect(() => {
-    if (tutorialAutoStartRef.current) return;
-    tutorialAutoStartRef.current = true;
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (videoTutorialAutoStartRef.current) return;
+    videoTutorialAutoStartRef.current = true;
     if (typeof window === "undefined") return;
 
     try {
-      const hasSeen = window.localStorage.getItem(VR_TUTORIAL_SEEN_KEY);
-      const hasLegacySeen = window.localStorage.getItem(VR_TUTORIAL_LEGACY_KEY);
-      const hasLegacyDone = window.localStorage.getItem(VR_TUTORIAL_LEGACY_DONE_KEY);
-      if (hasSeen || hasLegacySeen || hasLegacyDone) {
-        if (!hasSeen && (hasLegacySeen || hasLegacyDone)) {
-          window.localStorage.setItem(VR_TUTORIAL_SEEN_KEY, "1");
-        }
-        return;
-      }
+      const hasSeen = window.localStorage.getItem(VR_VIDEO_TUTORIAL_SEEN_KEY);
+      if (hasSeen) return;
     } catch {
       // ignore storage errors
     }
 
     const timer = window.setTimeout(() => {
-      setActive("A");
-      setTutorialOpen(true);
+      setVideoTutorialOpen(true);
     }, 0);
 
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!videoTutorialOpen) return;
+    if (typeof document !== "undefined") {
+      const previousOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = previousOverflow;
+      };
+    }
+  }, [videoTutorialOpen]);
+
+  useEffect(() => {
+    if (!videoTutorialOpen || typeof window === "undefined") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeVideoTutorial();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeVideoTutorial, videoTutorialOpen]);
 
   // Resize canvas to container
   useEffect(() => {
@@ -1259,95 +1275,6 @@ export default function VrPreview({ locale }: { locale: Locale }) {
     resetMasks();
   };
 
-  const tutorialSteps = useMemo<VrTutorialStep[]>(
-    () => [
-      {
-        id: "vr-title",
-        text: isRu
-          ? "Шаг 1. Это VR примерка: загружаете фото комнаты и сразу видите ковер в интерьере."
-          : "Step 1. This is VR try-on: upload a room photo and preview a rug in your interior.",
-      },
-      {
-        id: "upload-photo",
-        text: isRu ? "Шаг 2. Загрузите фото комнаты." : "Step 2. Upload a room photo.",
-        statusNote: roomUrl || roomImg ? (isRu ? "Фото загружено." : "Photo uploaded.") : undefined,
-      },
-      {
-        id: "choose-rug",
-        text: isRu
-          ? "Шаг 3. Выберите ковер: введите артикул, нажмите Найти и укажите размер."
-          : "Step 3. Choose a rug: enter the article, press Find, then select size.",
-        statusNote:
-          activeLayer.product && activeLayer.size
-            ? isRu
-              ? "Ковер и размер выбраны."
-              : "Rug and size selected."
-            : undefined,
-      },
-      {
-        id: "transform-controls",
-        text: isRu
-          ? "Шаг 4. Управляйте ковром: перемещайте на холсте, меняйте масштаб, поворот и жесты."
-          : "Step 4. Transform the rug: move it on canvas, adjust scale, rotation, and gestures.",
-      },
-      {
-        id: "mask-controls",
-        text: isRu
-          ? "Шаг 5. Используйте маску/ластик, чтобы скрыть части ковра под мебелью."
-          : "Step 5. Use mask/eraser to hide rug parts under furniture.",
-      },
-      {
-        id: "reset",
-        text: isRu
-          ? "Шаг 6. Кнопка Сброс очищает сцену и возвращает стартовое состояние."
-          : "Step 6. Reset clears the scene and returns to the initial state.",
-      },
-      {
-        id: "export",
-        text: isRu ? "Шаг 7. Сохраните результат кнопкой Скачать." : "Step 7. Export the result with Download.",
-        statusNote: canDownload ? (isRu ? "Готово к экспорту." : "Ready to export.") : undefined,
-      },
-    ],
-    [activeLayer.product, activeLayer.size, canDownload, isRu, roomImg, roomUrl]
-  );
-
-  const getTutorialTargetRect = useCallback(
-    (stepId: string): DOMRect | null => {
-      const getRect = (el: Element | null): DOMRect | null => {
-        if (!el) return null;
-        const rect = el.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return null;
-        return rect;
-      };
-      const getByTour = (tourId: string): Element | null => {
-        if (typeof document === "undefined") return null;
-        return document.querySelector(`[data-tour="${tourId}"]`);
-      };
-      const byStepId = getRect(getByTour(stepId));
-      if (byStepId) return byStepId;
-
-      switch (stepId) {
-        case "vr-title":
-          return getRect(titleRef.current);
-        case "upload-photo":
-          return getRect(uploadRef.current);
-        case "choose-rug":
-          return getRect(articleBlockRef.current ?? articleRef.current ?? findRef.current ?? sizeRef.current);
-        case "transform-controls":
-          return getRect(settingsRef.current ?? shadowRef.current ?? hostRef.current);
-        case "mask-controls":
-          return getRect(maskPanelRef.current ?? hintRef.current);
-        case "reset":
-          return getRect(resetRef.current);
-        case "export":
-          return getRect(downloadRef.current ?? formatRef.current);
-        default:
-          return null;
-      }
-    },
-    []
-  );
-
   const sizeOptions = (p: RugProduct | null) =>
     (p?.sizes ?? []).filter((s) => !/özel\s*ölçü|ozel\s*olcu/i.test(s));
 
@@ -1388,7 +1315,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
           </button>
           <button
             type="button"
-            onClick={openTutorial}
+            onClick={openVideoTutorial}
             className="h-10 px-4 rounded-lg border border-gray-300 text-gray-800 text-sm font-semibold hover:bg-gray-50 whitespace-nowrap"
           >
             {isRu ? "Обучение" : "Help"}
@@ -1702,13 +1629,46 @@ export default function VrPreview({ locale }: { locale: Locale }) {
         </div>
       </div>
 
-      <VrTutorial
-        isOpen={tutorialOpen}
-        locale={isRu ? "ru" : "en"}
-        steps={tutorialSteps}
-        getTargetRect={getTutorialTargetRect}
-        onClose={closeTutorial}
-      />
+      {isMounted && videoTutorialOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-50 bg-black/70 p-4 sm:p-6 flex items-center justify-center"
+              onClick={closeVideoTutorial}
+            >
+              <div
+                className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl border border-gray-200 overflow-hidden"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200">
+                  <h4 className="text-sm md:text-base font-semibold text-gray-900">
+                    {isRu ? "Видеообучение VR примерке" : "VR video tutorial"}
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={closeVideoTutorial}
+                    className="h-9 px-3 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    {isRu ? "Закрыть" : "Close"}
+                  </button>
+                </div>
+                <div className="p-3 sm:p-4 bg-black">
+                  <video
+                    src="/rugsvideo.mp4"
+                    controls
+                    autoPlay
+                    className="w-full aspect-video rounded-lg"
+                  >
+                    {isRu
+                      ? "Ваш браузер не поддерживает видео. Откройте файл /rugsvideo.mp4."
+                      : "Your browser does not support video. Open /rugsvideo.mp4."}
+                  </video>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
+
