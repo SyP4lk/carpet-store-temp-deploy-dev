@@ -7,7 +7,7 @@ import RugRecommendations from "@/components/pages/rugDetails/rugRecommendations
 import Banner from "@/components/shared/banner";
 import { FC, Suspense } from "react";
 import Script from "next/script";
-
+import { unstable_noStore as noStore } from "next/cache";
 import type { Metadata } from "next";
 import { Locale } from "@/localization/config";
 import { getDictionary } from "@/localization/dictionary";
@@ -18,8 +18,9 @@ import { getRecommendations } from "@/lib/recommendations";
 type ProductDetailsProps = {
   params: Promise<{ locale: Locale; rugId: string }>;
 };
-
+export const dynamic = "force-dynamic";
 const ProductDetails: FC<ProductDetailsProps> = async ({ params }) => {
+  noStore();
   const pathParams = await params;
   const locale = pathParams.locale;
   const rugId = pathParams.rugId;
@@ -167,6 +168,7 @@ export default ProductDetails;
 export async function generateMetadata({
   params,
 }: ProductDetailsProps): Promise<Metadata> {
+  noStore();
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://koenigcarpet.ru";
   const pathParams = await params;
   const locale = pathParams.locale;
@@ -231,14 +233,13 @@ export async function generateMetadata({
 }
 
 export async function generateStaticParams() {
-  // Не генерируем все товары на build - каталог большой и сборка становится очень долгой.
-  // Страницы будут генерироваться по запросу и кешироваться (ISR).
+  // force-dynamic disables prerendering for this route.
+  // Keep static params empty to avoid build-time generation for the whole catalog.
   return [];
 }
 
-// Allow dynamic params - новые товары будут генерироваться on-demand
+// Not required with force-dynamic, kept explicit to allow any rugId.
 export const dynamicParams = true;
 
-// ISR: Кешировать страницу товара на 1 час (3600 секунд)
-// Обновление произойдет автоматически или при вызове revalidatePath()
-export const revalidate = 3600;
+// ISR and prerender cache are intentionally disabled for this route
+// to prevent unbounded .next cache growth on production.

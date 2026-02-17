@@ -21,7 +21,7 @@ async function verifyFeatures() {
   console.log('✅ Product found:', product.productNames[0]?.name)
   console.log('\n=== Features Data ===')
 
-  product.features.forEach((feature) => {
+  product.features.forEach((feature: any) => {
     console.log(`\n📍 Locale: ${feature.locale}`)
     console.log(`📝 Head: ${feature.head.substring(0, 100)}...`)
     console.log(`🛠️  Care & Warranty items: ${feature.careAndWarranty.length}`)
