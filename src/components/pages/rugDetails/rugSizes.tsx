@@ -149,7 +149,7 @@ const RugSize: FC<{ rug: RugProduct }> = ({ rug }) => {
                 key={i}
                 data-selected={size === selectSize}
                 onClick={() => handleSelectSize(size)}
-                className="text-sm border px-4 py-2 whitespace-nowrap cursor-pointer transition hover:bg-gray-100 data-[selected=true]:bg-black data-[selected=true]:text-white"
+                className="text-sm border px-3 py-2 min-h-10 leading-tight text-center whitespace-normal [overflow-wrap:anywhere] cursor-pointer transition hover:bg-gray-100 data-[selected=true]:bg-black data-[selected=true]:text-white"
               >
                 {getDisplaySizeLabel(size)}
               </button>
