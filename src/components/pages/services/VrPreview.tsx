@@ -285,6 +285,7 @@ function initRectQuad(canvasW: number, canvasH: number, rugImg: HTMLImageElement
 
 export default function VrPreview({ locale }: { locale: Locale }) {
   const isRu = locale === "ru";
+  const videoTutorialSrc = isRu ? "/rugsvideo.mp4" : "/rugsvideo_en.mp4";
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
@@ -1653,14 +1654,14 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                 </div>
                 <div className="p-3 sm:p-4 bg-black">
                   <video
-                    src="/rugsvideo.mp4"
+                    src={videoTutorialSrc}
                     controls
                     autoPlay
                     className="w-full aspect-video rounded-lg"
                   >
                     {isRu
                       ? "Ваш браузер не поддерживает видео. Откройте файл /rugsvideo.mp4."
-                      : "Your browser does not support video. Open /rugsvideo.mp4."}
+                      : `Your browser does not support video. Open ${videoTutorialSrc}.`}
                   </video>
                 </div>
               </div>

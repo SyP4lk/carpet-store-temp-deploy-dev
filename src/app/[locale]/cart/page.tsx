@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Trash,
@@ -12,7 +12,7 @@ import { useCartStore } from "@/hooks/useCartStore";
 import { useLocale } from "@/hooks/useLocale";
 import { useCurrency } from "@/context/CurrencyContext";
 import Link from "next/link";
-import { getPriceOnRequestLabel, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { getPriceOnRequestLabel, isPriceOnRequestProduct, isSpecialSizeLabel, localizeSizeLabel } from "@/lib/productUtils";
 import { shouldUnoptimizeImage } from "@/lib/ticimaxImages";
 
 const CartPage = () => {
@@ -39,17 +39,17 @@ const CartPage = () => {
   } = useCartStore();
 
   // Конвертация цены в зависимости от локали с наценкой 2%
-  const convertPrice = (priceEur: number) => {
+  const convertPrice = useCallback((priceEur: number) => {
     if (locale === 'ru') {
       return Math.round(priceEur * eurToRubRate * 1.02);
     }
     // EN: евро + 2% наценка
     return Math.round(priceEur * 1.02);
-  };
+  }, [eurToRubRate, locale]);
 
   // hisob-kitoblar (в EUR)
   const subtotalEur = cart.reduce((sum, ci) => sum + ci.totalPrice, 0);
-  const subtotal = useMemo(() => convertPrice(subtotalEur), [subtotalEur, locale, eurToRubRate]);
+  const subtotal = useMemo(() => convertPrice(subtotalEur), [convertPrice, subtotalEur]);
 
   const handleOrder = async () => {
     if (!name || !phone) {
@@ -164,7 +164,13 @@ const CartPage = () => {
                       {ci.item.product_name[locale]}
                     </h3>
                     <p className="text-gray-500 text-sm">
-                      {ci.item.sizes[0]} cm
+                      {(() => {
+                        const rawSize = ci.item.sizes?.[0] ?? "";
+                        const localized = localizeSizeLabel(rawSize, locale);
+                        if (!rawSize) return "-";
+                        if (isSpecialSizeLabel(rawSize) || /cm/i.test(rawSize)) return localized;
+                        return `${localized} cm`;
+                      })()}
                     </p>
                     <p className="text-gray-500 text-sm mb-2">
                       {dictionary?.cart.yourCustomizations} ({ci.quantity}{" "}

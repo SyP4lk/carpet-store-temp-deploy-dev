@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Minus, ShoppingCart, MessageSquare } from "lucide-react";
 import { RugProduct } from "@/types/product";
@@ -10,7 +10,7 @@ import { calculateRugPrice } from "@/lib/calculatePrice";
 import { useDictionary } from "@/hooks/useDictionary";
 import { useCurrency } from "@/context/CurrencyContext";
 import { Locale } from "@/localization/config";
-import { getBmhomeVariantPriceEur, getDisplaySku, getPriceOnRequestLabel, getRequestPriceCta, isBmhomeSpecialSizeSelected, isPriceOnRequestProduct } from "@/lib/productUtils";
+import { getBmhomeVariantPriceEur, getDisplaySku, getPriceOnRequestLabel, getRequestPriceCta, isBmhomeSpecialSizeSelected, isPriceOnRequestProduct, localizeSizeLabel } from "@/lib/productUtils";
 
 
 type Props = {
@@ -26,14 +26,14 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
   const { eurToRubRate } = useCurrency();
 
   // Use defaultSize if available, otherwise fallback to first size
-  const getInitialSize = () => {
+  const getInitialSize = useCallback(() => {
     const filteredSizes = rug.sizes?.filter(s => s && s.trim().length > 0) || [];
     return rug.defaultSize && filteredSizes.includes(rug.defaultSize)
       ? rug.defaultSize
       : filteredSizes[0] || "";
-  };
+  }, [rug.defaultSize, rug.sizes]);
 
-  const [selectedSize, setSelectedSize] = useState(getInitialSize());
+  const [selectedSize, setSelectedSize] = useState(() => getInitialSize());
   const [quantity, setQuantity] = useState(1);
 
   // Order form state
@@ -62,7 +62,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
       // Use initial size (which respects defaultSize)
       setSelectedSize(getInitialSize());
     }
-  }, [searchParams, rug.sizes, rug.defaultSize]);
+  }, [getInitialSize, searchParams]);
 
 
   const isBmhome = !!rug.sourceMeta?.bmhome;
@@ -175,7 +175,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
       } else {
         setMessage(dictionary?.cart.order.error || "❌ Ошибка");
       }
-    } catch (error) {
+    } catch {
       setMessage(dictionary?.cart.order.error || "❌ Ошибка");
     } finally {
       setLoading(false);
@@ -259,7 +259,7 @@ const RugQuantityAddToCart: React.FC<Props> = ({ rug }) => {
             {/* Показываем информацию о товаре */}
             <div className="mb-3 p-3 bg-gray-50 rounded text-sm">
               <p><strong>{dictionary?.cart.order.stock || 'Артикул'}:</strong> {getDisplaySku(rug, selectedSize)}</p>
-              <p><strong>{locale === 'ru' ? 'Размер' : 'Size'}:</strong> {selectedSize}</p>
+              <p><strong>{locale === 'ru' ? 'Размер' : 'Size'}:</strong> {localizeSizeLabel(selectedSize, locale)}</p>
               <p><strong>{dictionary?.cart.quantity || 'Количество'}:</strong> {quantity}</p>
             </div>
 

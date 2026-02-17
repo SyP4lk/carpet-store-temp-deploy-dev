@@ -1,5 +1,16 @@
 import { RugProduct } from "@/types/product";
 
+const SPECIAL_SIZE_REGEX = /^ozel\s+olcu(?:\s*cm)?$/i;
+
+function normalizeSpecialSizeLabel(value: string): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function parseSizeLabel(size: string): { w: number; h: number } | null {
   const cleaned = (size || "").replace(/cm/gi, "").trim();
   const m = cleaned.match(/(\d+(?:\.\d+)?)\s*[x\u00d7\u0445]\s*(\d+(?:\.\d+)?)/i);
@@ -84,4 +95,19 @@ export function getBmhomeVariantPriceEur(rug: RugProduct, selectedSize?: string 
 export function hasBmhomeSpecialSize(rug: RugProduct): boolean {
   const variants = rug.sourceMeta?.bmhome?.variants ?? [];
   return variants.some((variant) => variant.isSpecialSize);
+}
+
+export function isSpecialSizeLabel(size?: string | null): boolean {
+  if (!size) return false;
+  return SPECIAL_SIZE_REGEX.test(normalizeSpecialSizeLabel(size));
+}
+
+export function getLocalizedSpecialSizeLabel(locale?: string): string {
+  return locale === "ru" ? "Индивидуальный размер" : "Custom size";
+}
+
+export function localizeSizeLabel(size?: string | null, locale?: string): string {
+  const raw = (size ?? "").trim();
+  if (!raw) return "";
+  return isSpecialSizeLabel(raw) ? getLocalizedSpecialSizeLabel(locale) : raw;
 }

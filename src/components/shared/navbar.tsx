@@ -40,13 +40,27 @@ const Navbar: React.FC<NavbarProps> = ({ fixed = false, mode="light" }) => {
 
 
     <header className={fixed ? "fixed top-0 w-full z-30" : ""}>
-      <div className="w-full bg-black  py-2">
-        <div className="flex text-white justify-center items-center gap-5 text-xs font-light tracking-wider">
-          <span>{dictionary?.header["custom-size"]}</span>
-          <span>|</span>
-          <span>{dictionary?.header["custom-color"]}</span>
-          <span>|</span>
-          <span>{dictionary?.header["custom-design"]}</span>
+      <div className="w-full bg-black py-2">
+        <div className="mx-auto max-w-screen-2xl px-2 sm:px-4 text-white">
+          <div className="grid grid-cols-3 gap-2 text-[10px] font-light tracking-wide sm:hidden">
+            <span className="min-w-0 text-center leading-tight [overflow-wrap:anywhere]">
+              {dictionary?.header["custom-size"]}
+            </span>
+            <span className="min-w-0 text-center leading-tight [overflow-wrap:anywhere]">
+              {dictionary?.header["custom-color"]}
+            </span>
+            <span className="min-w-0 text-center leading-tight [overflow-wrap:anywhere]">
+              {dictionary?.header["custom-design"]}
+            </span>
+          </div>
+
+          <div className="hidden sm:flex justify-center items-center gap-5 text-xs font-light tracking-wider">
+            <span>{dictionary?.header["custom-size"]}</span>
+            <span>|</span>
+            <span>{dictionary?.header["custom-color"]}</span>
+            <span>|</span>
+            <span>{dictionary?.header["custom-design"]}</span>
+          </div>
         </div>
       </div>
 

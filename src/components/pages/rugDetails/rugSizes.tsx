@@ -3,7 +3,9 @@
 import { RugProduct } from "@/types/product";
 import { FC, useState, useEffect, useMemo } from "react";
 import { useDictionary } from "@/hooks/useDictionary";
+import { useLocale } from "@/hooks/useLocale";
 import { useRouter, useSearchParams } from "next/navigation";
+import { isSpecialSizeLabel } from "@/lib/productUtils";
 
 const parseSize = (sizeStr?: string | null): { w: number; h: number } | null => {
   if (!sizeStr) return null;
@@ -33,6 +35,10 @@ const RugSize: FC<{ rug: RugProduct }> = ({ rug }) => {
   const [selectSizeType, setSelectSizeType] = useState<"standard" | "custom">("standard");
   const [selectSize, setSelectSize] = useState<string | null>(initialDefaultSize || null);
   const { dictionary } = useDictionary();
+  const [locale] = useLocale();
+  const defaultSpecialSizeLabel = locale === "ru" ? "Индивидуальный размер" : "Custom size";
+  const getDisplaySizeLabel = (size: string) =>
+    isSpecialSizeLabel(size) ? (dictionary?.shared.customSize || defaultSpecialSizeLabel) : size;
 
 
   const router = useRouter();
@@ -145,7 +151,7 @@ const RugSize: FC<{ rug: RugProduct }> = ({ rug }) => {
                 onClick={() => handleSelectSize(size)}
                 className="text-sm border px-4 py-2 whitespace-nowrap cursor-pointer transition hover:bg-gray-100 data-[selected=true]:bg-black data-[selected=true]:text-white"
               >
-                {size}
+                {getDisplaySizeLabel(size)}
               </button>
             ))}
           </div>
