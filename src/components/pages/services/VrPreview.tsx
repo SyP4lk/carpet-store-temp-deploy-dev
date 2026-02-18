@@ -1317,7 +1317,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
           <button
             type="button"
             onClick={openVideoTutorial}
-            className="h-10 px-4 rounded-lg border border-gray-300 text-gray-800 text-sm font-semibold hover:bg-gray-50 whitespace-nowrap"
+            className="h-10 px-4 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 whitespace-nowrap"
           >
             {isRu ? "Обучение" : "Help"}
           </button>
@@ -1419,7 +1419,7 @@ export default function VrPreview({ locale }: { locale: Locale }) {
                   <input
                     ref={articleRef}
                     data-tour="article-input"
-                    className="h-10 px-4 rounded-lg bg-black text-white font-semibold hover:bg-black/90"
+                    className="h-10 px-4 rounded-lg bg-black text-white placeholder:text-white font-semibold hover:bg-black/90"
                     value={activeLayer.article}
                     onChange={(e) => setLayer(active, { ...activeLayer, article: e.target.value })}
                     placeholder={isRu ? "Например: 2025-C-4395" : "e.g. 2025-C-4395"}

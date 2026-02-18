@@ -93,6 +93,9 @@ const stockCode = useMemo(() => getDisplaySku(rug, selectedSize) || "N/A", [rug,
       }}>
         {dictionary?.shared.sku || "SKU"}: {stockCode}
       </p>
+      <p className="text-xs text-gray-500 -mt-3">
+        {locale === "ru" ? "Нажмите на артикул, чтобы скопировать" : "Click the SKU to copy"}
+      </p>
       <p className="text-sm text-gray-700">{dictionary?.shared.produced}</p>
       <p className="text-base text-gray-800 leading-relaxed font-semibold">
         {priceOnRequest ? getPriceOnRequestLabel(locale) : formatPrice(currentPriceEur, locale, eurToRubRate)}
